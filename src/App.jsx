@@ -48,6 +48,19 @@ function farveForNavn(navn) {
   return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
 }
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = React.useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches
+  );
+  React.useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const handler = (e) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return isMobile;
+}
+
 function findSuggestion(value, options) {
   if (!value) return null;
   const lower = value.toLowerCase();
@@ -138,6 +151,11 @@ export default function Fagfordeling() {
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState("");
   const [udfoldede, setUdfoldede] = useState(new Set());
+
+  // Mobil-state: hvilken tab er aktiv og hvilket fag er åbnet i bottom-sheet
+  const isMobile = useIsMobile();
+  const [mobileTab, setMobileTab] = useState("fag"); // "fag" | "laerere"
+  const [mobileSheetFagId, setMobileSheetFagId] = useState(null);
 
   // Hent fra storage ved opstart
   useEffect(() => {
@@ -590,7 +608,10 @@ export default function Fagfordeling() {
         }
         input[type=number] { -moz-appearance: textfield; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes sheetFade { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes sheetSlide { from { transform: translateY(100%); } to { transform: translateY(0); } }
         .fag-card { animation: fadeIn 0.25s ease; }
+        .mobile-fag-tile:active { transform: scale(0.97); transition: transform 0.1s; }
         .fag-card-fagnavn { field-sizing: content; min-width: 60px; max-width: 100%; }
         .fag-card-lekt-input { field-sizing: content; min-width: 16px; }
 
@@ -709,6 +730,132 @@ export default function Fagfordeling() {
           </div>
         </header>
 
+        {/* === MOBIL-LAYOUT === */}
+        {isMobile && (
+          <div style={{ margin: "0 -16px" }}>
+            <MobileSummaryBar oversigt={oversigt} fag={fag} fagStatus={fagStatus} />
+            <MobileTabs
+              tab={mobileTab} setTab={setMobileTab}
+              fagAntal={fag.length} laererAntal={oversigt.length}
+            />
+
+            {mobileTab === "fag" && (
+              <div style={{ padding: "12px 12px 96px" }}>
+                {fag.length === 0 ? (
+                  <div style={{
+                    padding: "48px 24px", textAlign: "center",
+                    background: "#fff", border: "1px dashed #cdc5b8",
+                    color: "#7a7367",
+                  }}>
+                    <BookOpen size={28} style={{ marginBottom: "10px", opacity: 0.5 }} />
+                    <div style={{ fontSize: "13px" }}>Ingen fag endnu — tap + for at tilføje</div>
+                  </div>
+                ) : (
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, 1fr)",
+                    gap: "6px",
+                  }}>
+                    {fag.map((f) => {
+                      const statusInfo = fagStatus(f);
+                      return (
+                        <MobileFagTile
+                          key={f.id}
+                          f={f}
+                          statusInfo={statusInfo}
+                          status={statusInfo.status}
+                          farve={statusFarver[statusInfo.status]}
+                          onTap={() => setMobileSheetFagId(f.id)}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {mobileTab === "laerere" && (
+              <div style={{ padding: "12px 16px 96px" }}>
+                {oversigt.length === 0 ? (
+                  <div style={{
+                    padding: "48px 24px", textAlign: "center",
+                    background: "#fff", border: "1px dashed #cdc5b8",
+                    color: "#7a7367",
+                  }}>
+                    <Users size={28} style={{ marginBottom: "10px", opacity: 0.5 }} />
+                    <div style={{ fontSize: "13px" }}>Ingen lærere endnu</div>
+                  </div>
+                ) : (
+                  <div style={{ background: "#fff", border: "1px solid #e0d9ca" }}>
+                    {oversigt.map((l, i) => (
+                      <div key={l.navn} style={{
+                        padding: "12px 16px",
+                        borderBottom: i < oversigt.length - 1 ? "1px solid #f0ead9" : "none",
+                        display: "flex", alignItems: "center", gap: "12px",
+                      }}>
+                        <div style={{
+                          width: "32px", height: "32px", borderRadius: "50%",
+                          background: farveForNavn(l.navn), color: "#fff",
+                          fontSize: "13px", fontWeight: 600,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          flexShrink: 0,
+                        }}>
+                          {l.navn.charAt(0).toUpperCase()}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: "14px", fontWeight: 600, color: "#1a1a1a",
+                            marginBottom: "2px",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            {l.navn}
+                          </div>
+                          <div style={{
+                            fontSize: "11px", color: "#7a7367",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            {l.fag.map(fa => fa.fagNavn).join(" · ")}
+                          </div>
+                        </div>
+                        <div style={{
+                          fontFamily: "'Fraunces', Georgia, serif",
+                          fontSize: "20px", fontWeight: 600, color: "#1a1a1a",
+                        }}>
+                          {l.total}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* FAB — kun på fag-tab */}
+            {mobileTab === "fag" && (
+              <button
+                onClick={tilfoejFag}
+                aria-label="Tilføj fag"
+                style={{
+                  position: "fixed",
+                  bottom: "24px", right: "24px",
+                  width: "56px", height: "56px",
+                  borderRadius: "50%",
+                  background: "#1a1a1a", color: "#f5f1ea",
+                  border: "none", cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  boxShadow: "0 6px 20px rgba(26,26,26,0.28)",
+                  zIndex: 40,
+                }}
+              >
+                <Plus size={24} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* === DESKTOP-LAYOUT === */}
+        {!isMobile && (
+          <>
         {/* Mobil: kompakt stat-linje */}
         <StatLine
           fag={fag}
@@ -906,7 +1053,31 @@ export default function Fagfordeling() {
             </div>
           </aside>
         </div>
+          </>
+        )}
       </div>
+
+      {/* Mobile bottom-sheet for fag-redigering */}
+      {isMobile && mobileSheetFagId !== null && (() => {
+        const f = fag.find((x) => x.id === mobileSheetFagId);
+        if (!f) return null;
+        const statusInfo = fagStatus(f);
+        return (
+          <MobileFagSheet
+            f={f}
+            statusInfo={statusInfo}
+            status={statusInfo.status}
+            farve={statusFarver[statusInfo.status]}
+            opdaterFag={opdaterFag}
+            sletFag={(id) => { sletFag(id); setMobileSheetFagId(null); }}
+            tilfoejLaerer={tilfoejLaerer}
+            opdaterLaerer={opdaterLaerer}
+            sletLaerer={sletLaerer}
+            eksisterendeLaerere={eksisterendeLaerere}
+            onClose={() => setMobileSheetFagId(null)}
+          />
+        );
+      })()}
 
       {/* Import modal */}
       {showImport && (
@@ -1614,6 +1785,385 @@ function SortableFagCard({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// Mobile components
+// ============================================================
+
+function MobileSummaryBar({ oversigt, fag, fagStatus }) {
+  const counts = fag.reduce(
+    (acc, f) => {
+      const s = fagStatus(f).status;
+      if (s === "grøn") acc.gron += 1;
+      else if (s === "gul") acc.gul += 1;
+      else if (s === "rød") acc.rod += 1;
+      else if (s === "over") acc.gul += 1; // over tæller som problem
+      return acc;
+    },
+    { gron: 0, gul: 0, rod: 0 }
+  );
+  return (
+    <div style={{
+      display: "flex", gap: "14px", alignItems: "center",
+      padding: "10px 16px",
+      background: "#fff",
+      borderTop: "1px solid #e0d9ca",
+      borderBottom: "1px solid #e0d9ca",
+      fontSize: "12px",
+      color: "#4a463e",
+    }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+        <CheckCircle2 size={13} style={{ color: "#1e8e3e" }} /> {counts.gron}
+      </span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+        <Circle size={13} fill="#e8a317" strokeWidth={0} /> {counts.gul}
+      </span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+        <AlertCircle size={13} style={{ color: "#d93025" }} /> {counts.rod}
+      </span>
+      <span style={{ marginLeft: "auto", color: "#7a7367" }}>
+        {oversigt.length} {oversigt.length === 1 ? "lærer" : "lærere"}
+      </span>
+    </div>
+  );
+}
+
+function MobileTabs({ tab, setTab, fagAntal, laererAntal }) {
+  const tabStyle = (active) => ({
+    flex: 1,
+    padding: "12px 8px",
+    background: "transparent",
+    border: "none",
+    borderBottom: active ? "2px solid #1a1a1a" : "2px solid transparent",
+    color: active ? "#1a1a1a" : "#7a7367",
+    fontSize: "14px",
+    fontWeight: active ? 600 : 500,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "baseline",
+    gap: "6px",
+  });
+  return (
+    <div style={{ display: "flex", borderBottom: "1px solid #e0d9ca", background: "#fff" }}>
+      <button onClick={() => setTab("fag")} style={tabStyle(tab === "fag")}>
+        Fag <span style={{ fontSize: "12px", color: "#9a9387", fontWeight: 500 }}>{fagAntal}</span>
+      </button>
+      <button onClick={() => setTab("laerere")} style={tabStyle(tab === "laerere")}>
+        Lærere <span style={{ fontSize: "12px", color: "#9a9387", fontWeight: 500 }}>{laererAntal}</span>
+      </button>
+    </div>
+  );
+}
+
+function MobileFagTile({ f, statusInfo, status, farve, onTap }) {
+  const lektTal = parseInt(f.lektioner) || 0;
+  const navn = f.navn.trim() || "Uden navn";
+  const namedLaerere = f.laerere.filter((l) => l.navn.trim());
+  const forventede = parseInt(f.forventedeLaerere) || 2;
+  const emptyCount = Math.max(0, forventede - namedLaerere.length);
+  const showLaerere = namedLaerere.slice(0, 3);
+  const showEmpty = Math.min(emptyCount, 3 - showLaerere.length);
+
+  return (
+    <button
+      onClick={onTap}
+      className="mobile-fag-tile"
+      style={{
+        background: "#fff",
+        border: "1px solid #e0d9ca",
+        borderRadius: "6px",
+        padding: "10px 8px 8px",
+        textAlign: "left",
+        cursor: "pointer",
+        position: "relative",
+        minHeight: "94px",
+        display: "flex",
+        flexDirection: "column",
+        font: "inherit",
+        color: "inherit",
+      }}
+    >
+      <div style={{
+        position: "absolute", top: "6px", right: "6px",
+        color: farve.border, display: "flex", alignItems: "center",
+      }}>
+        {status === "grøn" && <CheckCircle2 size={14} />}
+        {status === "rød" && <AlertCircle size={14} />}
+        {status === "gul" && <Circle size={14} fill={farve.border} strokeWidth={0} />}
+        {status === "over" && <AlertCircle size={14} />}
+      </div>
+
+      <div style={{
+        fontSize: "11px", fontWeight: 600, color: "#1a1a1a",
+        lineHeight: 1.2, paddingRight: "16px", marginBottom: "4px",
+        overflow: "hidden",
+        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+        wordBreak: "break-word",
+      }}>
+        {navn}
+      </div>
+
+      <div style={{
+        fontFamily: "'Fraunces', Georgia, serif",
+        fontSize: "20px", fontWeight: 600, color: "#1a1a1a",
+        lineHeight: 1, letterSpacing: "-0.02em",
+        marginBottom: "8px",
+      }}>
+        {lektTal}
+        <span style={{
+          fontSize: "9px", fontWeight: 500, color: "#7a7367",
+          letterSpacing: 0, marginLeft: "3px",
+          fontFamily: "'Inter', system-ui, sans-serif",
+        }}>
+          lek
+        </span>
+      </div>
+
+      <div style={{ marginTop: "auto", display: "flex" }}>
+        {showLaerere.map((l, i) => (
+          <div key={l.id} style={{
+            width: "16px", height: "16px", borderRadius: "50%",
+            background: farveForNavn(l.navn), color: "#fff",
+            fontSize: "8px", fontWeight: 600,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            border: "1.5px solid #fff",
+            marginLeft: i === 0 ? 0 : "-3px",
+            flexShrink: 0,
+          }}>
+            {l.navn.charAt(0).toUpperCase()}
+          </div>
+        ))}
+        {Array.from({ length: showEmpty }).map((_, i) => (
+          <div key={`e${i}`} style={{
+            width: "16px", height: "16px", borderRadius: "50%",
+            background: "transparent",
+            border: "1.5px dashed #cdc5b8",
+            color: "#cdc5b8",
+            fontSize: "10px", fontWeight: 500,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            marginLeft: showLaerere.length === 0 && i === 0 ? 0 : "-3px",
+            flexShrink: 0,
+          }}>
+            +
+          </div>
+        ))}
+      </div>
+    </button>
+  );
+}
+
+function MobileLaererRowEdit({ fag, laerer, opdaterLaerer, sletLaerer, eksisterendeLaerere }) {
+  const harNavn = laerer.navn.trim().length > 0;
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: "10px",
+      padding: "10px 16px", borderTop: "1px solid #f0ead9",
+    }}>
+      <div style={{
+        width: "28px", height: "28px", borderRadius: "50%",
+        background: harNavn ? farveForNavn(laerer.navn) : "transparent",
+        border: harNavn ? "none" : "1px dashed #cdc5b8",
+        color: "#fff", fontSize: "12px", fontWeight: 600,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        flexShrink: 0,
+      }}>
+        {harNavn ? laerer.navn.charAt(0).toUpperCase() : ""}
+      </div>
+      <GhostInput
+        value={laerer.navn}
+        onChange={(navn) => opdaterLaerer(fag.id, laerer.id, { navn })}
+        suggestions={eksisterendeLaerere}
+        placeholder="Navn"
+        wrapperStyle={{ flex: 1, minWidth: 0 }}
+        style={{
+          width: "100%",
+          fontSize: "14px", fontWeight: 500, color: "#1a1a1a",
+          background: "transparent", border: "none",
+          padding: "6px 0",
+        }}
+      />
+      <input
+        type="number" min="0"
+        value={laerer.lektioner === "" || laerer.lektioner === undefined ? "" : laerer.lektioner}
+        onChange={(e) => {
+          const v = e.target.value;
+          opdaterLaerer(fag.id, laerer.id, { lektioner: v === "" ? "" : (parseInt(v) || 0) });
+        }}
+        onFocus={(e) => e.target.select()}
+        style={{
+          width: "44px", textAlign: "right",
+          fontFamily: "'Fraunces', Georgia, serif",
+          fontSize: "16px", fontWeight: 600, color: "#1a1a1a",
+          background: "transparent", border: "none",
+          padding: "6px 0",
+        }}
+      />
+      <button
+        onClick={() => sletLaerer(fag.id, laerer.id)}
+        style={{
+          background: "transparent", border: "none",
+          padding: "6px", cursor: "pointer", color: "#9a9387",
+          flexShrink: 0,
+        }}
+        aria-label="Fjern lærer"
+      >
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+function MobileFagSheet({
+  f, statusInfo, status, farve,
+  opdaterFag, sletFag,
+  tilfoejLaerer, opdaterLaerer, sletLaerer,
+  eksisterendeLaerere,
+  onClose,
+}) {
+  if (!f) return null;
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 60,
+      display: "flex", flexDirection: "column", justifyContent: "flex-end",
+    }}>
+      <div onClick={onClose} style={{
+        position: "absolute", inset: 0, background: "rgba(26,26,26,0.45)",
+        animation: "sheetFade 0.2s ease",
+      }} />
+
+      <div style={{
+        position: "relative", background: "#f5f1ea",
+        borderTopLeftRadius: "16px", borderTopRightRadius: "16px",
+        maxHeight: "88vh", overflowY: "auto",
+        animation: "sheetSlide 0.25s ease",
+        boxShadow: "0 -8px 24px rgba(26,26,26,0.18)",
+      }}>
+        <div style={{ display: "flex", justifyContent: "center", padding: "10px 0 4px" }}>
+          <div style={{ width: "36px", height: "4px", borderRadius: "2px", background: "#cdc5b8" }} />
+        </div>
+
+        <div style={{ padding: "8px 16px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ color: farve.border, flexShrink: 0, display: "flex" }}>
+            {status === "grøn" && <CheckCircle2 size={20} />}
+            {status === "rød" && <AlertCircle size={20} />}
+            {status === "gul" && <Circle size={20} fill={farve.border} strokeWidth={0} />}
+            {status === "over" && <AlertCircle size={20} />}
+          </div>
+          <input
+            value={f.navn}
+            onChange={(e) => opdaterFag(f.id, { navn: e.target.value })}
+            placeholder="Fagnavn"
+            style={{
+              flex: 1, minWidth: 0,
+              fontFamily: "'Fraunces', Georgia, serif",
+              fontSize: "22px", fontWeight: 600, color: "#1a1a1a",
+              background: "transparent", border: "none",
+              padding: "4px 0",
+            }}
+          />
+          <button onClick={onClose} style={{
+            background: "transparent", border: "none", cursor: "pointer",
+            padding: "8px", color: "#7a7367", flexShrink: 0,
+          }} aria-label="Luk">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div style={{
+          padding: "0 16px 16px", display: "grid",
+          gridTemplateColumns: "1fr 1fr", gap: "12px",
+        }}>
+          <label style={{ display: "block" }}>
+            <div style={{
+              fontSize: "10px", color: "#7a7367", marginBottom: "4px",
+              fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
+            }}>Lektioner</div>
+            <input
+              type="number" min="0"
+              value={f.lektioner === "" || f.lektioner === undefined ? "" : f.lektioner}
+              onChange={(e) => opdaterFag(f.id, { lektioner: e.target.value === "" ? "" : (parseInt(e.target.value) || 0) })}
+              onFocus={(e) => e.target.select()}
+              style={{
+                width: "100%", fontFamily: "'Fraunces', Georgia, serif",
+                fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
+                background: "#fff", border: "1px solid #e0d9ca",
+                padding: "10px 12px",
+              }}
+            />
+          </label>
+          <label style={{ display: "block" }}>
+            <div style={{
+              fontSize: "10px", color: "#7a7367", marginBottom: "4px",
+              fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
+            }}>Forventede lærere</div>
+            <input
+              type="number" min="1"
+              value={f.forventedeLaerere || 2}
+              onChange={(e) => opdaterFag(f.id, { forventedeLaerere: parseInt(e.target.value) || 1 })}
+              onFocus={(e) => e.target.select()}
+              style={{
+                width: "100%", fontFamily: "'Fraunces', Georgia, serif",
+                fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
+                background: "#fff", border: "1px solid #e0d9ca",
+                padding: "10px 12px",
+              }}
+            />
+          </label>
+        </div>
+
+        <div style={{ background: "#fff", borderTop: "1px solid #e0d9ca", borderBottom: "1px solid #e0d9ca" }}>
+          <div style={{
+            padding: "12px 16px 6px", fontSize: "10px",
+            color: "#7a7367", fontWeight: 600,
+            textTransform: "uppercase", letterSpacing: "0.06em",
+          }}>
+            Lærere
+          </div>
+          {f.laerere.map((l) => (
+            <MobileLaererRowEdit
+              key={l.id} fag={f} laerer={l}
+              opdaterLaerer={opdaterLaerer}
+              sletLaerer={sletLaerer}
+              eksisterendeLaerere={eksisterendeLaerere}
+            />
+          ))}
+          <button
+            onClick={() => tilfoejLaerer(f.id)}
+            style={{
+              width: "100%", padding: "12px 16px",
+              background: "transparent", border: "none",
+              borderTop: "1px dashed #e0d9ca",
+              fontSize: "13px", color: "#1a1a1a", fontWeight: 500,
+              cursor: "pointer", textAlign: "left",
+              display: "flex", alignItems: "center", gap: "8px",
+              fontFamily: "inherit",
+            }}
+          >
+            <Plus size={16} /> Tilføj lærer
+          </button>
+        </div>
+
+        <div style={{ padding: "16px 16px 24px" }}>
+          <button
+            onClick={() => { sletFag(f.id); onClose(); }}
+            style={{
+              width: "100%", padding: "12px",
+              background: "transparent",
+              border: "1px solid #d93025", color: "#d93025",
+              fontSize: "13px", fontWeight: 500, cursor: "pointer",
+              fontFamily: "inherit",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+            }}
+          >
+            <Trash2 size={14} /> Slet fag
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
