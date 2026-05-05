@@ -1866,8 +1866,6 @@ function MobileFagTile({ f, statusInfo, status, farve, onTap }) {
   const namedLaerere = f.laerere.filter((l) => l.navn.trim());
   const forventede = parseInt(f.forventedeLaerere) || 2;
   const emptyCount = Math.max(0, forventede - namedLaerere.length);
-  const showLaerere = namedLaerere.slice(0, 3);
-  const showEmpty = Math.min(emptyCount, 3 - showLaerere.length);
 
   return (
     <button
@@ -1877,11 +1875,10 @@ function MobileFagTile({ f, statusInfo, status, farve, onTap }) {
         background: "#fff",
         border: "1px solid #e0d9ca",
         borderRadius: "6px",
-        padding: "10px 8px 8px",
+        padding: "10px 8px 10px",
         textAlign: "left",
         cursor: "pointer",
         position: "relative",
-        minHeight: "94px",
         display: "flex",
         flexDirection: "column",
         font: "inherit",
@@ -1912,7 +1909,7 @@ function MobileFagTile({ f, statusInfo, status, farve, onTap }) {
         fontFamily: "'Fraunces', Georgia, serif",
         fontSize: "20px", fontWeight: 600, color: "#1a1a1a",
         lineHeight: 1, letterSpacing: "-0.02em",
-        marginBottom: "8px",
+        marginBottom: "10px",
       }}>
         {lektTal}
         <span style={{
@@ -1924,32 +1921,50 @@ function MobileFagTile({ f, statusInfo, status, farve, onTap }) {
         </span>
       </div>
 
-      <div style={{ marginTop: "auto", display: "flex" }}>
-        {showLaerere.map((l, i) => (
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        {namedLaerere.map((l) => (
           <div key={l.id} style={{
-            width: "16px", height: "16px", borderRadius: "50%",
-            background: farveForNavn(l.navn), color: "#fff",
-            fontSize: "8px", fontWeight: 600,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            border: "1.5px solid #fff",
-            marginLeft: i === 0 ? 0 : "-3px",
-            flexShrink: 0,
+            display: "flex", alignItems: "center", gap: "5px", minWidth: 0,
           }}>
-            {l.navn.charAt(0).toUpperCase()}
+            <div style={{
+              width: "16px", height: "16px", borderRadius: "50%",
+              background: farveForNavn(l.navn), color: "#fff",
+              fontSize: "8px", fontWeight: 600,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0,
+            }}>
+              {l.navn.charAt(0).toUpperCase()}
+            </div>
+            <div style={{
+              fontSize: "11px", fontWeight: 500, color: "#1a1a1a",
+              lineHeight: 1.2, minWidth: 0, flex: 1,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {l.navn}
+            </div>
           </div>
         ))}
-        {Array.from({ length: showEmpty }).map((_, i) => (
+        {Array.from({ length: emptyCount }).map((_, i) => (
           <div key={`e${i}`} style={{
-            width: "16px", height: "16px", borderRadius: "50%",
-            background: "transparent",
-            border: "1.5px dashed #cdc5b8",
-            color: "#cdc5b8",
-            fontSize: "10px", fontWeight: 500,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            marginLeft: showLaerere.length === 0 && i === 0 ? 0 : "-3px",
-            flexShrink: 0,
+            display: "flex", alignItems: "center", gap: "5px",
           }}>
-            +
+            <div style={{
+              width: "16px", height: "16px", borderRadius: "50%",
+              background: "transparent",
+              border: "1.5px dashed #cdc5b8",
+              color: "#cdc5b8",
+              fontSize: "10px", fontWeight: 500,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0,
+            }}>
+              +
+            </div>
+            <div style={{
+              fontSize: "11px", fontWeight: 500, color: "#cdc5b8",
+              lineHeight: 1.2, fontStyle: "italic",
+            }}>
+              tom
+            </div>
           </div>
         ))}
       </div>
