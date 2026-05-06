@@ -20,24 +20,25 @@ function normalizeNavn(navn) {
 }
 
 // 15 dæmpede jordfarver til avatarer. Mørke nok til at hvid tekst er læselig.
-// 15 dæmpede men levende farver — ikke vibrant, ikke døde. Hue-spektret er
-// spredt så to nabolærere ikke ender i samme brun-toned felt.
+// 15 dæmpede men levende farver. Cool-leaning balance: 1 ren rød, 1 ren gul,
+// INGEN brune/orange-mellemtoner (de var det der lod nabolærere flyde sammen).
+// Resten spredt over grøn, teal, blå, indigo, violet, plum, rosé + 2 neutrale.
 const AVATAR_PALETTE = [
-  "#a85146", // terracotta-rød
-  "#b06939", // pumpkin
-  "#a37d36", // amber
-  "#767d3a", // oliven
-  "#5e8748", // bladgrøn
-  "#498771", // pinje
+  "#b04a44", // brick red
+  "#c4a52a", // ochre (klar gul, ikke brun)
+  "#7a8a3c", // oliven
+  "#4d8a4f", // græsgrøn
+  "#3f8a72", // pinje
   "#3a8389", // teal
-  "#4180a0", // himmelblå
+  "#3d8aa9", // himmelblå
   "#4f6c98", // stålblå
+  "#3a4d75", // navy
   "#6e6396", // indigo
   "#75518a", // violet
   "#844f73", // plum
   "#a45c75", // rose
   "#5c6878", // skifer
-  "#6b605b", // varm grå
+  "#4a4a4a", // koks
 ];
 
 // Forkortelser til fag-tags i lærersidebaren — max 3 tegn (fx Mat, Idr, F/K).
