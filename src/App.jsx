@@ -339,6 +339,9 @@ export default function Fagfordeling() {
   const [klasseNavn, setKlasseNavn] = useState("Min klasse");
   const [fag, setFag] = useState([]);
   const [loaded, setLoaded] = useState(false);
+  // Empty-state-flow: når brugeren har valgt klassetrin men endnu ikke
+  // valgt typisk antal lærere, viser vi spørgsmålet i stedet for klassetrin-grid.
+  const [valgtKlassetrin, setValgtKlassetrin] = useState(null);
   const [showImport, setShowImport] = useState(false);
   const [importFejl, setImportFejl] = useState("");
   const importFilRef = React.useRef(null);
@@ -398,28 +401,33 @@ export default function Fagfordeling() {
     setUdfoldede(new Set([...udfoldede, nytId]));
   };
 
-  // Indlæser fagrække for et givent klassetrin (1-9). Tomme lærere kan
-  // tilføjes manuelt af brugeren. Hver fag får 2 forventedeLaerere som default.
-  const indlaesSkabelon = (klassetrin) => {
+  // Indlæser fagrække for et givent klassetrin med valgt antal lærere som
+  // default. Tomme lærer-pladser oprettes (op til antalLaerere) klar til
+  // navngivning. Brugeren kan altid justere senere.
+  const indlaesSkabelon = (klassetrin, antalLaerere) => {
     const skabelon = FAGRAEKKE_TEMPLATES[klassetrin];
     if (!skabelon) return;
+    const antal = Math.max(1, Math.min(3, antalLaerere || 2));
     const baseId = Date.now();
     const nyeFag = skabelon.map((s, i) => {
       const fagId = baseId + i * 10;
+      const laerere = Array.from({ length: antal }).map((_, j) => ({
+        id: fagId + 1 + j,
+        navn: "",
+        lektioner: s.lektioner,
+      }));
       return {
         id: fagId,
         navn: s.navn,
         lektioner: s.lektioner,
-        forventedeLaerere: 2,
-        laerere: [
-          { id: fagId + 1, navn: "", lektioner: s.lektioner },
-          { id: fagId + 2, navn: "", lektioner: s.lektioner },
-        ],
+        forventedeLaerere: antal,
+        laerere,
       };
     });
     setKlasseNavn(`${klassetrin}. klasse`);
     setFag(nyeFag);
     setUdfoldede(new Set());
+    setValgtKlassetrin(null); // Reset så empty-state er klar igen efter "Start forfra"
   };
 
   const toggleUdfoldet = (id) => {
@@ -676,6 +684,7 @@ export default function Fagfordeling() {
         setKlasseNavn("Min klasse");
         setFag([]);
         setUdfoldede(new Set());
+        setValgtKlassetrin(null);
         try { localStorage.removeItem("fagfordeling-data"); } catch (e) {}
         setBekraeftSlet(null);
       },
@@ -1227,64 +1236,133 @@ export default function Fagfordeling() {
               }}>
                 <div style={{ textAlign: "center", marginBottom: "20px" }}>
                   <BookOpen size={28} style={{ marginBottom: "10px", opacity: 0.4, color: "#7a7367" }} />
-                  <div style={{
-                    fontFamily: "'Fraunces', Georgia, serif",
-                    fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
-                    marginBottom: "6px",
-                  }}>
-                    Start fra fagrække
-                  </div>
-                  <div style={{ fontSize: "13px", color: "#7a7367", lineHeight: 1.5 }}>
-                    Vælg klassetrin for at indlæse vejledende UVM-tal.<br/>
-                    Tilføj selv tysk/fransk og evt. valgfag bagefter.
-                  </div>
-                </div>
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(72px, 1fr))",
-                  gap: "8px",
-                  marginBottom: "16px",
-                }}>
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((k) => (
-                    <button
-                      key={k}
-                      onClick={() => indlaesSkabelon(k)}
-                      style={{
-                        padding: "12px 8px",
+                  {valgtKlassetrin === null ? (
+                    <>
+                      <div style={{
                         fontFamily: "'Fraunces', Georgia, serif",
-                        fontSize: "16px", fontWeight: 500, color: "#1a1a1a",
-                        background: "#f5f1ea", border: "1px solid #e0d9ca",
-                        cursor: "pointer",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = "#1a1a1a";
-                        e.currentTarget.style.color = "#f5f1ea";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = "#f5f1ea";
-                        e.currentTarget.style.color = "#1a1a1a";
-                      }}
-                    >
-                      {k}.
-                    </button>
-                  ))}
+                        fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
+                        marginBottom: "6px",
+                      }}>
+                        Start fra fagrække
+                      </div>
+                      <div style={{ fontSize: "13px", color: "#7a7367", lineHeight: 1.5 }}>
+                        Vælg klassetrin for at indlæse vejledende UVM-tal.<br/>
+                        Tilføj selv tysk/fransk og evt. valgfag bagefter.
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{
+                        fontFamily: "'Fraunces', Georgia, serif",
+                        fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
+                        marginBottom: "6px",
+                      }}>
+                        Hvor mange lærere er der typisk på et fag?
+                      </div>
+                      <div style={{ fontSize: "13px", color: "#7a7367", lineHeight: 1.5 }}>
+                        Hvert fag i {valgtKlassetrin}. klasse får så mange tomme lærer-pladser klar til at få navne.<br/>
+                        Du kan altid justere senere pr. fag.
+                      </div>
+                    </>
+                  )}
                 </div>
+                {valgtKlassetrin === null ? (
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(72px, 1fr))",
+                    gap: "8px",
+                    marginBottom: "16px",
+                  }}>
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((k) => (
+                      <button
+                        key={k}
+                        onClick={() => setValgtKlassetrin(k)}
+                        style={{
+                          padding: "12px 8px",
+                          fontFamily: "'Fraunces', Georgia, serif",
+                          fontSize: "16px", fontWeight: 500, color: "#1a1a1a",
+                          background: "#f5f1ea", border: "1px solid #e0d9ca",
+                          cursor: "pointer",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = "#1a1a1a";
+                          e.currentTarget.style.color = "#f5f1ea";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = "#f5f1ea";
+                          e.currentTarget.style.color = "#1a1a1a";
+                        }}
+                      >
+                        {k}.
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, 1fr)",
+                    gap: "8px",
+                    marginBottom: "16px",
+                    maxWidth: "320px",
+                    margin: "0 auto 16px",
+                  }}>
+                    {[1, 2, 3].map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => indlaesSkabelon(valgtKlassetrin, n)}
+                        style={{
+                          padding: "16px 8px",
+                          fontFamily: "'Fraunces', Georgia, serif",
+                          fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
+                          background: "#f5f1ea", border: "1px solid #e0d9ca",
+                          cursor: "pointer",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = "#1a1a1a";
+                          e.currentTarget.style.color = "#f5f1ea";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = "#f5f1ea";
+                          e.currentTarget.style.color = "#1a1a1a";
+                        }}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div style={{
                   textAlign: "center", fontSize: "12px", color: "#9a9387",
                   paddingTop: "16px", borderTop: "1px solid #f0ead9",
                 }}>
-                  eller{" "}
-                  <button
-                    onClick={tilfoejFag}
-                    style={{
-                      background: "transparent", border: "none",
-                      color: "#5a5448", cursor: "pointer",
-                      fontSize: "12px", textDecoration: "underline",
-                      padding: 0,
-                    }}
-                  >
-                    start tom og byg selv
-                  </button>
+                  {valgtKlassetrin === null ? (
+                    <>
+                      eller{" "}
+                      <button
+                        onClick={tilfoejFag}
+                        style={{
+                          background: "transparent", border: "none",
+                          color: "#5a5448", cursor: "pointer",
+                          fontSize: "12px", textDecoration: "underline",
+                          padding: 0,
+                        }}
+                      >
+                        start tom og byg selv
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => setValgtKlassetrin(null)}
+                      style={{
+                        background: "transparent", border: "none",
+                        color: "#5a5448", cursor: "pointer",
+                        fontSize: "12px", textDecoration: "underline",
+                        padding: 0,
+                      }}
+                    >
+                      ← tilbage og vælg andet klassetrin
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -2093,9 +2171,9 @@ function SortableFagCard({
       </div>
 
       {/* Kollapset: kompakte lærer-rækker (avatar + navn + svag "X lek").
-          Tomme pladser fyldes op til forventedeLaerere, så kort med 1 lærer
-          har samme højde som kort med 2 lærere. */}
-      {!erUdfoldet && f.laerere.some((l) => l.navn.trim()) && (() => {
+          Tomme pladser fyldes op til forventedeLaerere, så kort har konsistent
+          højde — også cards uden navngivne lærere endnu (fx fra skabelon). */}
+      {!erUdfoldet && (() => {
         const namedLaerere = f.laerere.filter((l) => l.navn.trim());
         const forventede = parseInt(f.forventedeLaerere) || 2;
         const emptyCount = Math.max(0, forventede - namedLaerere.length);
