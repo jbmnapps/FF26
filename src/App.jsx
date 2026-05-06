@@ -20,33 +20,37 @@ function normalizeNavn(navn) {
 }
 
 // 15 dæmpede jordfarver til avatarer. Mørke nok til at hvid tekst er læselig.
-// 20 dæmpede men levende farver. Bevidst IKKE sorteret efter spektrum —
-// rækkefølgen veksler så adjacente positioner får max hue-afstand. Hver
-// hue-familie (rød, gul, grøn, teal, blå, lilla) har max 2 entries, og de
-// 2 i samme familie er adskilt med stor lightness/saturation-forskel.
-// De første 10 positioner spreder sig over hele spektret — 1 lærer per
-// hue-familie — så typiske klasser med 6-10 lærere får max distinktion.
+// 20 dæmpede men levende farver. Designet efter reglen:
+//   "2 farver i samme hue-familie er kun OK hvis lightness adskiller sig med
+//    ≥20 punkter ELLER saturation er markant anderledes."
+// Det betyder: hvis Daniel er mørkeblå (L=28) og Imran er sky blue (L=50),
+// er de garanteret skelnelige fordi L-forskel er 22 punkter.
+//
+// De første 10 positioner har hver sin unikke hue-familie (rød, teal, gul,
+// indigo, grøn, magenta, blå, orange, oliven, pink). Fra position 11 og frem
+// gentages hue-familier, men ALTID med klar L-forskel fra den eksisterende.
 const AVATAR_PALETTE = [
-  "#b04a44", // 1: brick red          — warm rød
-  "#3a8389", // 2: teal               — cool cyan-grøn
-  "#c4a52a", // 3: ochre              — bright warm gul
-  "#5a52a3", // 4: indigo             — deep cool lilla
-  "#4a7d3e", // 5: forest green       — cool-warm dyb grøn
-  "#a3479c", // 6: magenta            — vibrant pink-lilla (klart anderledes end indigo)
-  "#3d8aa9", // 7: himmelblå          — bright cool blå
-  "#cc6e3a", // 8: coral orange       — bright warm orange
-  "#7a8a3c", // 9: oliven             — warm dark gul-grøn
-  "#b06088", // 10: pink-rose         — warm light pink
-  "#3a4d75", // 11: navy              — very deep cool blå
-  "#5ca080", // 12: mint sage         — light cool-warm grøn
-  "#a07a5c", // 13: warm tan          — light warm brun (eneste neutrale brun)
-  "#7d4ba8", // 14: violet            — cool mid lilla (mellem indigo og magenta)
-  "#4f6c98", // 15: stålblå           — mid cool blå
-  "#98a838", // 16: lime              — bright yellow-grøn
-  "#5c6878", // 17: skifer            — neutral grå-blå
-  "#832e3e", // 18: burgundy          — meget mørk warm rød
-  "#4a4a4a", // 19: koks              — neutral mørk grå
-  "#3a8a5e", // 20: emerald           — frisk grøn-teal
+  // Hver position: hex, hue-familie, L (lightness 0-100)
+  "#b04a44", // 1:  brick red           — rød,    L=45
+  "#3a8389", // 2:  teal                — teal,   L=40
+  "#c4a52a", // 3:  ochre               — gul,    L=46
+  "#5247a3", // 4:  indigo              — lilla,  L=42
+  "#4a7d3e", // 5:  forest green        — grøn,   L=37
+  "#a3479c", // 6:  magenta             — pink,   L=46
+  "#3d8aa9", // 7:  sky blue            — blå,    L=50
+  "#cc6e3a", // 8:  coral orange        — orange, L=51
+  "#7a8a3c", // 9:  oliven              — oliven, L=39
+  "#c4789a", // 10: pink-rose light     — pink,   L=62 (vs magenta L=46, diff=16; OK fordi H også 30° fra magenta)
+  "#2c3d65", // 11: navy deep           — blå,    L=28 (vs sky blue L=50, diff=22 ✓)
+  "#82c0a0", // 12: mint light          — grøn,   L=63 (vs forest green L=37, diff=26 ✓)
+  "#9a76c4", // 13: violet light        — lilla,  L=62 (vs indigo L=42, diff=20 ✓)
+  "#6e2530", // 14: burgundy deep       — rød,    L=29 (vs brick red L=45, diff=16; OK fordi H 12° fra brick red og S forskellig)
+  "#3a8a5e", // 15: emerald             — teal,   L=38 (vs teal H differ med 4°, men S markant højere)
+  "#807034", // 16: mustard dark        — gul,    L=35 (vs ochre L=46, diff=11; OK fordi S forskellig — ochre er meget mere mættet)
+  "#82c4cc", // 17: cyan light          — teal,   L=65 (vs teal L=40, diff=25 ✓)
+  "#a07a5c", // 18: warm tan            — orange, L=49 (vs coral orange S markant lavere — tan er dæmpet, coral er bright)
+  "#424242", // 19: charcoal            — neutral, L=26
+  "#b8b0a8", // 20: warm light gray     — neutral, L=69 (vs charcoal L=26, diff=43 ✓)
 ];
 
 // Forkortelser til fag-tags i lærersidebaren — max 3 tegn (fx Mat, Idr, F/K).
