@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Plus, Trash2, Download, Upload, X, Users, BookOpen, AlertCircle, CheckCircle2, Circle, ChevronDown, GripVertical, RotateCcw } from "lucide-react";
-import { DndContext, DragOverlay, closestCorners, pointerWithin, rectIntersection, MouseSensor, TouchSensor, useSensor, useSensors, MeasuringStrategy } from "@dnd-kit/core";
+import { DndContext, DragOverlay, closestCorners, pointerWithin, rectIntersection, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, MeasuringStrategy } from "@dnd-kit/core";
 import { SortableContext, useSortable, rectSortingStrategy, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
@@ -20,22 +20,24 @@ function normalizeNavn(navn) {
 }
 
 // 15 dæmpede jordfarver til avatarer. Mørke nok til at hvid tekst er læselig.
+// 15 dæmpede men levende farver — ikke vibrant, ikke døde. Hue-spektret er
+// spredt så to nabolærere ikke ender i samme brun-toned felt.
 const AVATAR_PALETTE = [
-  "#8a4a2e", // rust
-  "#5a6b3a", // oliven
-  "#a6562d", // terracotta
-  "#7a5e3a", // sand
-  "#6b3d5a", // plum
-  "#2e4a6e", // navy
-  "#3d5e4a", // mosgrøn
-  "#8a6e2a", // dyb gul
-  "#2a5a5e", // mørk turkis
-  "#8a5e6e", // dyb rosa
-  "#4a3a6e", // blåviolet
-  "#6e4a3a", // kakao
-  "#3a3a3a", // koksgrå
-  "#5a4a2a", // umbra
-  "#6e5a3a", // bronze
+  "#a85146", // terracotta-rød
+  "#b06939", // pumpkin
+  "#a37d36", // amber
+  "#767d3a", // oliven
+  "#5e8748", // bladgrøn
+  "#498771", // pinje
+  "#3a8389", // teal
+  "#4180a0", // himmelblå
+  "#4f6c98", // stålblå
+  "#6e6396", // indigo
+  "#75518a", // violet
+  "#844f73", // plum
+  "#a45c75", // rose
+  "#5c6878", // skifer
+  "#6b605b", // varm grå
 ];
 
 // Forkortelser til fag-tags i lærersidebaren — max 3 tegn (fx Mat, Idr, F/K).
@@ -561,6 +563,10 @@ export default function Fagfordeling() {
 
   const activeDragLaerer = (() => {
     if (!activeDragId) return null;
+    // Sidebar-drag: ID format "sidebar:<navn>"
+    if (typeof activeDragId === "string" && activeDragId.startsWith("sidebar:")) {
+      return { navn: activeDragId.slice("sidebar:".length), lektioner: 0 };
+    }
     if (fag.some((f) => f.id === activeDragId)) return null; // fag-drag
     for (const f of fag) {
       const l = f.laerere.find((l) => l.id === activeDragId);
@@ -571,9 +577,11 @@ export default function Fagfordeling() {
 
   const handleDragStart = ({ active }) => {
     setActiveDragId(active.id);
-    // Track origin for lærer-drags
+    // Track origin for lærer-drags inde i fag-kortene (til lektionstal-justering).
+    // Sidebar-drags har ingen enkelt origin-fag.
+    const isSidebarDrag = typeof active.id === "string" && active.id.startsWith("sidebar:");
     const isFagDrag = fag.some((f) => f.id === active.id);
-    if (!isFagDrag) {
+    if (!isFagDrag && !isSidebarDrag) {
       const origin = fag.find((f) => f.laerere.some((l) => l.id === active.id));
       dragStartFagIdRef.current = origin?.id ?? null;
     } else {
@@ -591,6 +599,10 @@ export default function Fagfordeling() {
     // Skip fag-drag — gridets SortableContext + rectSortingStrategy håndterer
     const activeIsFag = fag.some((f) => f.id === active.id);
     if (activeIsFag) return;
+
+    // Skip sidebar-drag — den håndteres som "tilføj lærer til fag" i handleDragEnd
+    const isSidebarDrag = typeof active.id === "string" && active.id.startsWith("sidebar:");
+    if (isSidebarDrag) return;
 
     const overIsFag = fag.some((f) => f.id === over.id);
 
@@ -639,6 +651,33 @@ export default function Fagfordeling() {
 
     const activeIsFag = fag.some((f) => f.id === activeId);
     const overIsFag = fag.some((f) => f.id === over.id);
+
+    // Sidebar-drag: tilføj lærer til target-fag (med lektioner = fagets lektioner).
+    // Skip hvis lærer allerede er på faget.
+    if (typeof activeId === "string" && activeId.startsWith("sidebar:")) {
+      const sidebarNavn = activeId.slice("sidebar:".length);
+      let targetFagId = null;
+      if (overIsFag) {
+        targetFagId = over.id;
+      } else {
+        const overFag = fag.find((f) => f.laerere.some((l) => l.id === over.id));
+        if (overFag) targetFagId = overFag.id;
+      }
+      if (!targetFagId) return;
+      setFag((prev) => prev.map((f) => {
+        if (f.id !== targetFagId) return f;
+        const norm = normalizeNavn(sidebarNavn).toLowerCase();
+        if (f.laerere.some((l) => normalizeNavn(l.navn).toLowerCase() === norm)) {
+          return f; // allerede på faget — no-op
+        }
+        const fagLekt = parseInt(f.lektioner) || 0;
+        return {
+          ...f,
+          laerere: [...f.laerere, { id: Date.now(), navn: sidebarNavn, lektioner: fagLekt }],
+        };
+      }));
+      return;
+    }
 
     // Fag-drag: reorder i grid
     if (activeIsFag) {
@@ -987,7 +1026,17 @@ export default function Fagfordeling() {
           <StatusBox samletMangler={samletMangler} samletOver={samletOver} antalFag={fag.length} />
         </div>
 
-        {/* Hovedindhold: 2 kolonner — fag fylder, lærer-sidebar er kompakt fast bredde */}
+        {/* Hovedindhold: 2 kolonner — fag fylder, lærer-sidebar er kompakt fast bredde.
+            DndContext omslutter begge kolonner så lærere kan trækkes både mellem fag-kort
+            og fra sidebaren ind på et fag. */}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={collisionDetectionStrategy}
+          measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+        >
         <div className="main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 264px", gap: "16px", alignItems: "start" }}>
           {/* Venstre: Fag */}
           <div>
@@ -1014,14 +1063,6 @@ export default function Fagfordeling() {
               </div>
             )}
 
-            <DndContext
-              sensors={sensors}
-              collisionDetection={collisionDetectionStrategy}
-              measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
-              onDragStart={handleDragStart}
-              onDragOver={handleDragOver}
-              onDragEnd={handleDragEnd}
-            >
               <SortableContext items={fag.map((f) => f.id)} strategy={rectSortingStrategy}>
                 <div className="fag-grid" style={{
                   display: "grid",
@@ -1054,35 +1095,6 @@ export default function Fagfordeling() {
                   })}
                 </div>
               </SortableContext>
-              {/* DragOverlay sikrer at trukket lærer altid er øverst,
-                  også over inputs i andre fag-kort */}
-              <DragOverlay dropAnimation={null}>
-                {activeDragLaerer ? (
-                  <div style={{
-                    display: "inline-flex", alignItems: "center", gap: "8px",
-                    cursor: "grabbing",
-                    filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.18))",
-                  }}>
-                    <div style={{
-                      width: "22px", height: "22px", borderRadius: "50%",
-                      background: farveForNavn(activeDragLaerer.navn),
-                      color: "#fff", fontSize: "11px", fontWeight: 600,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      flexShrink: 0,
-                    }}>
-                      {activeDragLaerer.navn ? activeDragLaerer.navn.charAt(0).toUpperCase() : "?"}
-                    </div>
-                    <span style={{
-                      fontSize: "13px", fontWeight: 500, color: "#1a1a1a",
-                      fontStyle: "normal",
-                      whiteSpace: "nowrap",
-                    }}>
-                      {activeDragLaerer.navn}
-                    </span>
-                  </div>
-                ) : null}
-              </DragOverlay>
-            </DndContext>
 
 
             <button
@@ -1124,66 +1136,41 @@ export default function Fagfordeling() {
                   <div style={{ fontSize: "13px" }}>Ingen lærere endnu</div>
                 </div>
               ) : (
-                oversigt.map((l, i) => (
-                  <div key={l.navn} className="laerer-item" style={{
-                    padding: "10px 14px",
-                  }}>
-                    <div className="laerer-item-row" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <div className="laerer-avatar" style={{
-                        width: "18px", height: "18px", borderRadius: "50%",
-                        background: farveForNavn(l.navn), color: "#fff",
-                        fontSize: "10px", fontWeight: 600,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        flexShrink: 0,
-                        alignSelf: "flex-start",
-                        marginTop: "1px",
-                      }}>
-                        {l.navn.charAt(0).toUpperCase()}
-                      </div>
-
-                      <div style={{
-                        flex: 1, minWidth: 0,
-                        display: "flex", flexWrap: "wrap", alignItems: "center",
-                        gap: "6px 8px",
-                      }}>
-                        <span className="laerer-navn" style={{
-                          fontSize: "13px", fontWeight: 600, color: "#1a1a1a",
-                          lineHeight: 1.2,
-                        }}>
-                          {l.navn}
-                        </span>
-                        {l.fag.map((fa, j) => (
-                          <span key={j} title={fa.fagNavn} style={{
-                            fontSize: "11px",
-                            color: "#9a9387",
-                            fontWeight: 400,
-                            lineHeight: 1.3,
-                            whiteSpace: "nowrap",
-                          }}>
-                            {fagForkortelse(fa.fagNavn)}{" "}
-                            <span style={{ color: "#5a5448" }}>
-                              {fa.lektioner}
-                            </span>
-                          </span>
-                        ))}
-                      </div>
-                      <div className="laerer-total" style={{
-                        fontSize: "13px", fontWeight: 500, color: "#1a1a1a",
-                        lineHeight: 1.2,
-                        fontVariantNumeric: "tabular-nums",
-                        minWidth: "28px", textAlign: "right",
-                        alignSelf: "flex-start",
-                        marginTop: "1px",
-                      }}>
-                        {l.total}
-                      </div>
-                    </div>
-                  </div>
+                oversigt.map((l) => (
+                  <SidebarLaererRow key={l.navn} l={l} />
                 ))
               )}
             </div>
           </aside>
         </div>
+        {/* DragOverlay sikrer at trukket lærer altid er øverst, også over inputs */}
+        <DragOverlay dropAnimation={null}>
+          {activeDragLaerer ? (
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: "8px",
+              cursor: "grabbing",
+              filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.18))",
+            }}>
+              <div style={{
+                width: "22px", height: "22px", borderRadius: "50%",
+                background: farveForNavn(activeDragLaerer.navn),
+                color: "#fff", fontSize: "11px", fontWeight: 600,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0,
+              }}>
+                {activeDragLaerer.navn ? activeDragLaerer.navn.charAt(0).toUpperCase() : "?"}
+              </div>
+              <span style={{
+                fontSize: "13px", fontWeight: 500, color: "#1a1a1a",
+                fontStyle: "normal",
+                whiteSpace: "nowrap",
+              }}>
+                {activeDragLaerer.navn}
+              </span>
+            </div>
+          ) : null}
+        </DragOverlay>
+        </DndContext>
           </>
         )}
       </div>
@@ -1500,6 +1487,82 @@ function ConfirmModal({ titel, tekst, bekraeftTekst = "Slet", onBekraeft, onAnnu
           >
             {bekraeftTekst}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Sidebar-lærer: draggable mod fag-kort. ID format "sidebar:<navn>" for at
+// skille det fra fag- og laerer-instans-IDs. Drop håndteres i handleDragEnd.
+function SidebarLaererRow({ l }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `sidebar:${l.navn}`,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      className="laerer-item"
+      style={{
+        padding: "10px 14px",
+        opacity: isDragging ? 0.4 : 1,
+      }}
+    >
+      <div className="laerer-item-row" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <div
+          {...listeners}
+          className="laerer-avatar"
+          style={{
+            width: "18px", height: "18px", borderRadius: "50%",
+            background: farveForNavn(l.navn), color: "#fff",
+            fontSize: "10px", fontWeight: 600,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+            alignSelf: "flex-start",
+            marginTop: "1px",
+            cursor: "grab",
+            touchAction: "none",
+          }}
+        >
+          {l.navn.charAt(0).toUpperCase()}
+        </div>
+
+        <div style={{
+          flex: 1, minWidth: 0,
+          display: "flex", flexWrap: "wrap", alignItems: "center",
+          gap: "6px 8px",
+        }}>
+          <span className="laerer-navn" style={{
+            fontSize: "13px", fontWeight: 600, color: "#1a1a1a",
+            lineHeight: 1.2,
+          }}>
+            {l.navn}
+          </span>
+          {l.fag.map((fa, j) => (
+            <span key={j} title={fa.fagNavn} style={{
+              fontSize: "11px",
+              color: "#9a9387",
+              fontWeight: 400,
+              lineHeight: 1.3,
+              whiteSpace: "nowrap",
+            }}>
+              {fagForkortelse(fa.fagNavn)}{" "}
+              <span style={{ color: "#5a5448" }}>
+                {fa.lektioner}
+              </span>
+            </span>
+          ))}
+        </div>
+        <div className="laerer-total" style={{
+          fontSize: "13px", fontWeight: 500, color: "#1a1a1a",
+          lineHeight: 1.2,
+          fontVariantNumeric: "tabular-nums",
+          minWidth: "28px", textAlign: "right",
+          alignSelf: "flex-start",
+          marginTop: "1px",
+        }}>
+          {l.total}
         </div>
       </div>
     </div>
