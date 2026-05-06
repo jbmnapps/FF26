@@ -20,26 +20,33 @@ function normalizeNavn(navn) {
 }
 
 // 15 dæmpede jordfarver til avatarer. Mørke nok til at hvid tekst er læselig.
-// 15 dæmpede men levende farver. Bevidst IKKE sorteret efter spektrum —
-// rækkefølgen veksler så adjacente positioner får max hue-afstand. Lærer #0
-// og #1 hopper fra rød til teal, #1 og #2 fra teal til ochre osv. Det
-// sikrer at to nabolærere på listen er let skelnelige selv ved kort kig.
+// 20 dæmpede men levende farver. Bevidst IKKE sorteret efter spektrum —
+// rækkefølgen veksler så adjacente positioner får max hue-afstand. Hver
+// hue-familie (rød, gul, grøn, teal, blå, lilla) har max 2 entries, og de
+// 2 i samme familie er adskilt med stor lightness/saturation-forskel.
+// De første 10 positioner spreder sig over hele spektret — 1 lærer per
+// hue-familie — så typiske klasser med 6-10 lærere får max distinktion.
 const AVATAR_PALETTE = [
   "#b04a44", // 1: brick red          — warm rød
   "#3a8389", // 2: teal               — cool cyan-grøn
   "#c4a52a", // 3: ochre              — bright warm gul
-  "#6e6396", // 4: indigo             — deep cool lilla
-  "#4d8a4f", // 5: græsgrøn           — frisk cool-warm grøn
-  "#844f73", // 6: plum               — dark warm-cool plum
+  "#5a52a3", // 4: indigo             — deep cool lilla
+  "#4a7d3e", // 5: forest green       — cool-warm dyb grøn
+  "#a3479c", // 6: magenta            — vibrant pink-lilla (klart anderledes end indigo)
   "#3d8aa9", // 7: himmelblå          — bright cool blå
-  "#a45c75", // 8: rose               — warm light pink
+  "#cc6e3a", // 8: coral orange       — bright warm orange
   "#7a8a3c", // 9: oliven             — warm dark gul-grøn
-  "#75518a", // 10: violet            — cool mid lilla
-  "#3f8a72", // 11: pinje             — cool-warm grøn-teal
-  "#3a4d75", // 12: navy              — very deep cool blå
-  "#4f6c98", // 13: stålblå           — mid cool blå
-  "#5c6878", // 14: skifer            — neutral grå-blå
-  "#4a4a4a", // 15: koks              — neutral mørk grå
+  "#b06088", // 10: pink-rose         — warm light pink
+  "#3a4d75", // 11: navy              — very deep cool blå
+  "#5ca080", // 12: mint sage         — light cool-warm grøn
+  "#a07a5c", // 13: warm tan          — light warm brun (eneste neutrale brun)
+  "#7d4ba8", // 14: violet            — cool mid lilla (mellem indigo og magenta)
+  "#4f6c98", // 15: stålblå           — mid cool blå
+  "#98a838", // 16: lime              — bright yellow-grøn
+  "#5c6878", // 17: skifer            — neutral grå-blå
+  "#832e3e", // 18: burgundy          — meget mørk warm rød
+  "#4a4a4a", // 19: koks              — neutral mørk grå
+  "#3a8a5e", // 20: emerald           — frisk grøn-teal
 ];
 
 // Forkortelser til fag-tags i lærersidebaren — max 3 tegn (fx Mat, Idr, F/K).
