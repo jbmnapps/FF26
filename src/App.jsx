@@ -20,25 +20,26 @@ function normalizeNavn(navn) {
 }
 
 // 15 dæmpede jordfarver til avatarer. Mørke nok til at hvid tekst er læselig.
-// 15 dæmpede men levende farver. Cool-leaning balance: 1 ren rød, 1 ren gul,
-// INGEN brune/orange-mellemtoner (de var det der lod nabolærere flyde sammen).
-// Resten spredt over grøn, teal, blå, indigo, violet, plum, rosé + 2 neutrale.
+// 15 dæmpede men levende farver. Bevidst IKKE sorteret efter spektrum —
+// rækkefølgen veksler så adjacente positioner får max hue-afstand. Lærer #0
+// og #1 hopper fra rød til teal, #1 og #2 fra teal til ochre osv. Det
+// sikrer at to nabolærere på listen er let skelnelige selv ved kort kig.
 const AVATAR_PALETTE = [
-  "#b04a44", // brick red
-  "#c4a52a", // ochre (klar gul, ikke brun)
-  "#7a8a3c", // oliven
-  "#4d8a4f", // græsgrøn
-  "#3f8a72", // pinje
-  "#3a8389", // teal
-  "#3d8aa9", // himmelblå
-  "#4f6c98", // stålblå
-  "#3a4d75", // navy
-  "#6e6396", // indigo
-  "#75518a", // violet
-  "#844f73", // plum
-  "#a45c75", // rose
-  "#5c6878", // skifer
-  "#4a4a4a", // koks
+  "#b04a44", // 1: brick red          — warm rød
+  "#3a8389", // 2: teal               — cool cyan-grøn
+  "#c4a52a", // 3: ochre              — bright warm gul
+  "#6e6396", // 4: indigo             — deep cool lilla
+  "#4d8a4f", // 5: græsgrøn           — frisk cool-warm grøn
+  "#844f73", // 6: plum               — dark warm-cool plum
+  "#3d8aa9", // 7: himmelblå          — bright cool blå
+  "#a45c75", // 8: rose               — warm light pink
+  "#7a8a3c", // 9: oliven             — warm dark gul-grøn
+  "#75518a", // 10: violet            — cool mid lilla
+  "#3f8a72", // 11: pinje             — cool-warm grøn-teal
+  "#3a4d75", // 12: navy              — very deep cool blå
+  "#4f6c98", // 13: stålblå           — mid cool blå
+  "#5c6878", // 14: skifer            — neutral grå-blå
+  "#4a4a4a", // 15: koks              — neutral mørk grå
 ];
 
 // Forkortelser til fag-tags i lærersidebaren — max 3 tegn (fx Mat, Idr, F/K).
