@@ -574,11 +574,6 @@ export default function Fagfordeling() {
     return null;
   })();
 
-  const activeDragFag = (() => {
-    if (!activeDragId) return null;
-    return fag.find((f) => f.id === activeDragId) || null;
-  })();
-
   const handleDragStart = ({ active }) => {
     setActiveDragId(active.id);
     // Track origin for lærer-drags
@@ -1089,36 +1084,6 @@ export default function Fagfordeling() {
                     }}>
                       {activeDragLaerer.navn}
                     </span>
-                  </div>
-                ) : activeDragFag ? (
-                  <div style={{
-                    background: "#fff",
-                    border: "1px solid #1a1a1a",
-                    boxShadow: "0 12px 32px rgba(26,26,26,0.22)",
-                    padding: "14px 14px 12px 14px",
-                    cursor: "grabbing",
-                    minWidth: "260px",
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                      <span style={{
-                        fontFamily: "'Fraunces', Georgia, serif",
-                        fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
-                        flex: 1, minWidth: 0, overflow: "hidden",
-                        textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}>
-                        {activeDragFag.navn || "Fag"}
-                      </span>
-                      <span style={{
-                        fontFamily: "'Fraunces', Georgia, serif",
-                        fontSize: "16px", fontWeight: 500, color: "#5a5448",
-                        flexShrink: 0,
-                      }}>
-                        {activeDragFag.lektioner || 0}
-                      </span>
-                      <span style={{ fontSize: "12px", color: "#9a9387", flexShrink: 0 }}>
-                        lektioner
-                      </span>
-                    </div>
                   </div>
                 ) : null}
               </DragOverlay>
@@ -1702,12 +1667,14 @@ function SortableFagCard({
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: f.id });
   const sortableStyle = {
-    // Når kortet trækkes: bliv stille på plads (DragOverlay følger musen).
-    // De andre kort shuffler omkring en stabil tom slot — uden glitch.
-    transform: isDragging ? undefined : CSS.Transform.toString(transform),
-    transition: isDragging ? undefined : transition,
-    opacity: isDragging ? 0 : 1,
+    // Standard sortable-grid: det aktive kort følger musen via transform.
+    // SortableContext + rectSortingStrategy animerer de andre kort til deres
+    // nye positioner.
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
     zIndex: isDragging ? 10 : "auto",
+    boxShadow: isDragging ? "0 12px 32px rgba(26,26,26,0.22)" : "none",
   };
 
   return (
