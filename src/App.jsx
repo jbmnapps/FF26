@@ -343,6 +343,12 @@ export default function Fagfordeling() {
   // valgt typisk antal lærere, viser vi spørgsmålet i stedet for klassetrin-grid.
   const [valgtKlassetrin, setValgtKlassetrin] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  // Pending lærer-navne: tilføjet via sidebar-knappen, men endnu ikke placeret
+  // på et fag. Vises i sidebaren med total=0 så de kan trækkes til fag.
+  const [pendingNavne, setPendingNavne] = useState([]);
+  // Kontrollerer om "Tilføj lærer"-input feltet i sidebaren er åbent.
+  const [tilfoejNavnAaben, setTilfoejNavnAaben] = useState(false);
+  const [nytLaererNavn, setNytLaererNavn] = useState("");
   const [importFejl, setImportFejl] = useState("");
   const importFilRef = React.useRef(null);
   const [udfoldede, setUdfoldede] = useState(new Set());
@@ -520,6 +526,13 @@ export default function Fagfordeling() {
         };
       })
     );
+    // Hvis nyt navn matcher en pending lærer, fjern fra pendingNavne
+    if (opdateringer.navn !== undefined) {
+      const norm = normalizeNavn(opdateringer.navn).toLowerCase();
+      if (norm) {
+        setPendingNavne((prev) => prev.filter((n) => normalizeNavn(n).toLowerCase() !== norm));
+      }
+    }
   };
 
   const sletLaererInternal = (fagId, laererId) => {
@@ -568,38 +581,42 @@ export default function Fagfordeling() {
   const fagStatus = (f) => {
     const fagLekt = parseInt(f.lektioner) || 0;
     const forventedeLaerere = parseInt(f.forventedeLaerere) || 2;
-    const antal = f.laerere.length;
-    const harNavne = antal > 0 && f.laerere.every((l) => l.navn.trim() !== "");
-    const sum = f.laerere.reduce((s, l) => s + (parseInt(l.lektioner) || 0), 0);
-    const manglerLaerere = Math.max(0, forventedeLaerere - antal);
-    const krav = fagLekt; // minimum sum for "dækket" (sharing-model)
-    const maxKrav = fagLekt * Math.max(antal, 1); // maksimum sum (team-teaching med alle assigned)
+    // Kun navngivne lærere tæller — placeholder-rækker (fra skabelon eller
+    // manuelt tomme) regnes ikke med, så et fag uden navngivne lærere er "tom"
+    // i stedet for "rød/mangler".
+    const navngivne = f.laerere.filter((l) => l.navn.trim());
+    const navngivneAntal = navngivne.length;
+    const navngivneSum = navngivne.reduce((s, l) => s + (parseInt(l.lektioner) || 0), 0);
+    const manglerLaerere = Math.max(0, forventedeLaerere - navngivneAntal);
+    const krav = fagLekt;
+    const maxKrav = fagLekt * Math.max(navngivneAntal, 1);
 
-    // Tom eller mangler navne
-    if (antal === 0 || sum === 0 || !harNavne) {
-      return { status: "rød", krav, sum, manglerLaerere };
+    // Tom: ingen navngivne lærere endnu — vises UDEN status-ikon (neutral)
+    if (navngivneAntal === 0) {
+      return { status: "tom", krav, sum: 0, manglerLaerere };
     }
 
-    // Mangler lærere (færre end forventet)
+    // Mangler lærere (færre navngivne end forventet)
     if (manglerLaerere > 0) {
-      return { status: "gul", krav, sum, manglerLaerere };
+      return { status: "gul", krav, sum: navngivneSum, manglerLaerere };
     }
 
-    // Over-dækning: sum overskrider selv team-teaching
-    if (sum > maxKrav) {
-      return { status: "over", krav, sum, manglerLaerere: 0 };
+    // Over-dækning
+    if (navngivneSum > maxKrav) {
+      return { status: "over", krav, sum: navngivneSum, manglerLaerere: 0 };
     }
 
-    // Mangler lektioner: sum dækker ikke engang sharing-niveau
-    if (sum < fagLekt) {
-      return { status: "gul", krav, sum, manglerLaerere: 0 };
+    // Mangler lektioner
+    if (navngivneSum < fagLekt) {
+      return { status: "gul", krav, sum: navngivneSum, manglerLaerere: 0 };
     }
 
-    // Alt OK: antal ≥ forventede og sum er i [fagLekt, fagLekt × antal]
-    return { status: "grøn", krav, sum, manglerLaerere: 0 };
+    // Alt OK
+    return { status: "grøn", krav, sum: navngivneSum, manglerLaerere: 0 };
   };
 
-  // Lærer-oversigt på tværs
+  // Lærer-oversigt på tværs. Aggregerer fra fag + tilføjer pending navne
+  // (tilføjet via sidebar-knappen men endnu ikke placeret på et fag).
   const laererOversigt = () => {
     const map = {};
     fag.forEach((f) => {
@@ -614,6 +631,10 @@ export default function Fagfordeling() {
           lektioner: lekt,
         });
       });
+    });
+    // Pending navne — vises med total 0 og ingen fag-chips
+    pendingNavne.forEach((navn) => {
+      if (!map[navn]) map[navn] = { navn, total: 0, fag: [] };
     });
     return Object.values(map).sort((a, b) => b.total - a.total);
   };
@@ -685,6 +706,9 @@ export default function Fagfordeling() {
         setFag([]);
         setUdfoldede(new Set());
         setValgtKlassetrin(null);
+        setPendingNavne([]);
+        setTilfoejNavnAaben(false);
+        setNytLaererNavn("");
         try { localStorage.removeItem("fagfordeling-data"); } catch (e) {}
         setBekraeftSlet(null);
       },
@@ -853,6 +877,8 @@ export default function Fagfordeling() {
           laerere: [...f.laerere, { id: Date.now(), navn: sidebarNavn, lektioner: fagLekt }],
         };
       }));
+      // Fjern fra pendingNavne — læreren er nu på et rigtigt fag
+      setPendingNavne((prev) => prev.filter((n) => n !== sidebarNavn));
       return;
     }
 
@@ -906,6 +932,7 @@ export default function Fagfordeling() {
   };
 
   const statusFarver = {
+    tom: { bg: "#fff", border: "#cdc5b8", tekst: "#9a9387", label: "Tom" },
     rød: { bg: "#fce8e6", border: "#d93025", tekst: "#9d2517", label: "Mangler" },
     gul: { bg: "#fef7e0", border: "#e8a317", tekst: "#7a5400", label: "Delvis" },
     grøn: { bg: "#e6f4ea", border: "#1e8e3e", tekst: "#0d652d", label: "OK" },
@@ -1434,7 +1461,7 @@ export default function Fagfordeling() {
             </div>
 
             <div style={{ background: "transparent" }}>
-              {oversigt.length === 0 ? (
+              {oversigt.length === 0 && !tilfoejNavnAaben ? (
                 <div style={{ padding: "32px 14px", textAlign: "center", color: "#9a9387" }}>
                   <Users size={24} style={{ marginBottom: "8px", opacity: 0.5 }} />
                   <div style={{ fontSize: "13px" }}>Ingen lærere endnu</div>
@@ -1443,6 +1470,63 @@ export default function Fagfordeling() {
                 oversigt.map((l) => (
                   <SidebarLaererRow key={l.navn} l={l} />
                 ))
+              )}
+            </div>
+
+            {/* Tilføj lærer-flow: knap åbner input. Enter → tilføjer til
+                pendingNavne og resetter feltet for hurtigt at indtaste flere
+                navne i træk. Esc eller blur uden tekst → lukker input. */}
+            <div style={{ marginTop: "10px", padding: "0 14px" }}>
+              {tilfoejNavnAaben ? (
+                <input
+                  autoFocus
+                  type="text"
+                  value={nytLaererNavn}
+                  onChange={(e) => setNytLaererNavn(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const navn = normalizeNavn(nytLaererNavn);
+                      if (navn) {
+                        // Skip hvis navnet allerede findes (på fag eller pending)
+                        const findes =
+                          pendingNavne.some((n) => normalizeNavn(n).toLowerCase() === navn.toLowerCase()) ||
+                          fag.some((f) => f.laerere.some((l) => normalizeNavn(l.navn).toLowerCase() === navn.toLowerCase()));
+                        if (!findes) {
+                          setPendingNavne([...pendingNavne, navn]);
+                        }
+                      }
+                      setNytLaererNavn("");
+                    } else if (e.key === "Escape") {
+                      setTilfoejNavnAaben(false);
+                      setNytLaererNavn("");
+                    }
+                  }}
+                  onBlur={() => {
+                    // Luk hvis feltet er tomt
+                    if (!nytLaererNavn.trim()) {
+                      setTilfoejNavnAaben(false);
+                    }
+                  }}
+                  placeholder="Lærerens navn — tryk enter"
+                  style={{
+                    width: "100%", padding: "8px 10px",
+                    fontSize: "13px", color: "#1a1a1a",
+                    background: "#fff", border: "1px solid #1a1a1a",
+                  }}
+                />
+              ) : (
+                <button
+                  onClick={() => setTilfoejNavnAaben(true)}
+                  style={{
+                    width: "100%", padding: "8px 10px",
+                    fontSize: "13px", fontWeight: 500, color: "#5a5448",
+                    background: "transparent", border: "1px dashed #cdc5b8",
+                    cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+                  }}
+                >
+                  <Plus size={14} /> Tilføj lærer
+                </button>
               )}
             </div>
           </aside>
@@ -2135,8 +2219,12 @@ function SortableFagCard({
           flexShrink: 0, display: "flex",
           alignItems: "center", justifyContent: "center",
           color: farve.border,
+          // Reservér samme bredde som ikonerne så header-layout ikke shifter
+          // når status går fra "tom" til andet
+          width: "18px", height: "18px",
         }}
-          title={status === "grøn" ? (statusInfo.delt ? "Dækket (delt)" : "Dækket") :
+          title={status === "tom" ? "Ingen lærere endnu — tilføj fra højre eller skriv ind i kortet" :
+                 status === "grøn" ? (statusInfo.delt ? "Dækket (delt)" : "Dækket") :
                  status === "rød" ? "Tomt — tilføj lærere og lektioner" :
                  status === "gul" ? (statusInfo.manglerLaerere > 0
                    ? `Mangler ${statusInfo.manglerLaerere} lærer${statusInfo.manglerLaerere === 1 ? "" : "e"}`
@@ -2147,6 +2235,7 @@ function SortableFagCard({
           {status === "rød" && <AlertCircle size={18} />}
           {status === "gul" && <Circle size={18} strokeWidth={2} />}
           {status === "over" && <AlertCircle size={18} />}
+          {/* status === "tom" → ingen ikon (neutralt udgangspunkt) */}
         </div>
 
         {/* Toggle-knap */}
@@ -2188,7 +2277,14 @@ function SortableFagCard({
               ))}
             </SortableContext>
             {Array.from({ length: emptyCount }).map((_, i) => (
-              <div key={`empty-${i}`} style={{ height: "26px" }} />
+              <div key={`empty-${i}`} style={{
+                height: "26px",
+                display: "flex", alignItems: "center",
+                paddingLeft: "26px", // matcher avatar-bredde + gap
+                fontSize: "13px", color: "#cdc5b8",
+              }}>
+                Lærer {namedLaerere.length + i + 1}
+              </div>
             ))}
           </div>
         );
