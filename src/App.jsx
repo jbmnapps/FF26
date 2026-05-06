@@ -12,6 +12,115 @@ const STANDARD_FAG = [
   "Klassens tid", "Understøttende undervisning",
 ];
 
+// Fagrække-skabeloner pr. klassetrin baseret på UVM's "Timetal for fagene i
+// folkeskolen — skoleåret 2025/2026". Kun obligatoriske fag med klare
+// timetal — tysk/fransk, valgfag og kristendom 7./8. (konfirmation-twisten)
+// er bevidst udeladt, da de varierer fra skole til skole. Brugeren kan
+// tilføje dem selv. Tallene er ugentlige lektioner (UVM-årligt-timetal / 30).
+const FAGRAEKKE_TEMPLATES = {
+  1: [
+    { navn: "Dansk", lektioner: 11 },
+    { navn: "Matematik", lektioner: 5 },
+    { navn: "Idræt", lektioner: 2 },
+    { navn: "Kristendom", lektioner: 2 },
+    { navn: "Musik", lektioner: 2 },
+    { navn: "Natur/teknologi", lektioner: 1 },
+  ],
+  2: [
+    { navn: "Dansk", lektioner: 11 },
+    { navn: "Matematik", lektioner: 5 },
+    { navn: "Engelsk", lektioner: 1 },
+    { navn: "Idræt", lektioner: 2 },
+    { navn: "Kristendom", lektioner: 1 },
+    { navn: "Musik", lektioner: 2 },
+    { navn: "Billedkunst", lektioner: 2 },
+    { navn: "Natur/teknologi", lektioner: 1 },
+  ],
+  3: [
+    { navn: "Dansk", lektioner: 8 },
+    { navn: "Matematik", lektioner: 5 },
+    { navn: "Engelsk", lektioner: 2 },
+    { navn: "Historie", lektioner: 1 },
+    { navn: "Idræt", lektioner: 2 },
+    { navn: "Kristendom", lektioner: 1 },
+    { navn: "Musik", lektioner: 2 },
+    { navn: "Billedkunst", lektioner: 2 },
+    { navn: "Håndværk og design", lektioner: 2 },
+    { navn: "Natur/teknologi", lektioner: 2 },
+  ],
+  4: [
+    { navn: "Dansk", lektioner: 7 },
+    { navn: "Matematik", lektioner: 5 },
+    { navn: "Engelsk", lektioner: 2 },
+    { navn: "Historie", lektioner: 2 },
+    { navn: "Idræt", lektioner: 2 },
+    { navn: "Kristendom", lektioner: 1 },
+    { navn: "Musik", lektioner: 2 },
+    { navn: "Billedkunst", lektioner: 2 },
+    { navn: "Håndværk og design", lektioner: 2 },
+    { navn: "Natur/teknologi", lektioner: 3 },
+  ],
+  5: [
+    { navn: "Dansk", lektioner: 7 },
+    { navn: "Matematik", lektioner: 5 },
+    { navn: "Engelsk", lektioner: 4 },
+    { navn: "Historie", lektioner: 2 },
+    { navn: "Idræt", lektioner: 2 },
+    { navn: "Kristendom", lektioner: 1 },
+    { navn: "Musik", lektioner: 2 },
+    { navn: "Billedkunst", lektioner: 1 },
+    { navn: "Håndværk og design", lektioner: 2 },
+    { navn: "Madkundskab", lektioner: 2 },
+    { navn: "Natur/teknologi", lektioner: 2 },
+  ],
+  6: [
+    { navn: "Dansk", lektioner: 7 },
+    { navn: "Matematik", lektioner: 5 },
+    { navn: "Engelsk", lektioner: 3 },
+    { navn: "Historie", lektioner: 2 },
+    { navn: "Idræt", lektioner: 2 },
+    { navn: "Kristendom", lektioner: 2 },
+    { navn: "Musik", lektioner: 1 },
+    { navn: "Billedkunst", lektioner: 1 },
+    { navn: "Håndværk og design", lektioner: 2 },
+    { navn: "Madkundskab", lektioner: 2 },
+    { navn: "Natur/teknologi", lektioner: 2 },
+  ],
+  7: [
+    { navn: "Dansk", lektioner: 7 },
+    { navn: "Matematik", lektioner: 5 },
+    { navn: "Engelsk", lektioner: 3 },
+    { navn: "Historie", lektioner: 2 },
+    { navn: "Idræt", lektioner: 2 },
+    { navn: "Geografi", lektioner: 2 },
+    { navn: "Biologi", lektioner: 2 },
+    { navn: "Fysik/kemi", lektioner: 2 },
+  ],
+  8: [
+    { navn: "Dansk", lektioner: 7 },
+    { navn: "Matematik", lektioner: 5 },
+    { navn: "Engelsk", lektioner: 3 },
+    { navn: "Historie", lektioner: 2 },
+    { navn: "Samfundsfag", lektioner: 2 },
+    { navn: "Idræt", lektioner: 2 },
+    { navn: "Geografi", lektioner: 1 },
+    { navn: "Biologi", lektioner: 1 },
+    { navn: "Fysik/kemi", lektioner: 2 },
+  ],
+  9: [
+    { navn: "Dansk", lektioner: 7 },
+    { navn: "Matematik", lektioner: 5 },
+    { navn: "Engelsk", lektioner: 3 },
+    { navn: "Historie", lektioner: 2 },
+    { navn: "Samfundsfag", lektioner: 2 },
+    { navn: "Idræt", lektioner: 2 },
+    { navn: "Kristendom", lektioner: 1 },
+    { navn: "Geografi", lektioner: 1 },
+    { navn: "Biologi", lektioner: 1 },
+    { navn: "Fysik/kemi", lektioner: 3 },
+  ],
+};
+
 function normalizeNavn(navn) {
   if (!navn) return "";
   return navn.trim().split(/\s+/).map(word =>
@@ -287,6 +396,30 @@ export default function Fagfordeling() {
     ]);
     // Fold automatisk ud
     setUdfoldede(new Set([...udfoldede, nytId]));
+  };
+
+  // Indlæser fagrække for et givent klassetrin (1-9). Tomme lærere kan
+  // tilføjes manuelt af brugeren. Hver fag får 2 forventedeLaerere som default.
+  const indlaesSkabelon = (klassetrin) => {
+    const skabelon = FAGRAEKKE_TEMPLATES[klassetrin];
+    if (!skabelon) return;
+    const baseId = Date.now();
+    const nyeFag = skabelon.map((s, i) => {
+      const fagId = baseId + i * 10;
+      return {
+        id: fagId,
+        navn: s.navn,
+        lektioner: s.lektioner,
+        forventedeLaerere: 2,
+        laerere: [
+          { id: fagId + 1, navn: "", lektioner: s.lektioner },
+          { id: fagId + 2, navn: "", lektioner: s.lektioner },
+        ],
+      };
+    });
+    setKlasseNavn(`${klassetrin}. klasse`);
+    setFag(nyeFag);
+    setUdfoldede(new Set());
   };
 
   const toggleUdfoldet = (id) => {
@@ -1089,12 +1222,70 @@ export default function Fagfordeling() {
 
             {fag.length === 0 && (
               <div style={{
-                padding: "48px 24px", textAlign: "center",
-                background: "#fff", border: "1px dashed #cdc5b8",
-                color: "#7a7367",
+                padding: "32px 28px",
+                background: "#fff", border: "1px solid #e0d9ca",
               }}>
-                <BookOpen size={32} style={{ marginBottom: "12px", opacity: 0.5 }} />
-                <div style={{ fontSize: "14px" }}>Ingen fag endnu. Tilføj dit første fag nedenfor.</div>
+                <div style={{ textAlign: "center", marginBottom: "20px" }}>
+                  <BookOpen size={28} style={{ marginBottom: "10px", opacity: 0.4, color: "#7a7367" }} />
+                  <div style={{
+                    fontFamily: "'Fraunces', Georgia, serif",
+                    fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
+                    marginBottom: "6px",
+                  }}>
+                    Start fra fagrække
+                  </div>
+                  <div style={{ fontSize: "13px", color: "#7a7367", lineHeight: 1.5 }}>
+                    Vælg klassetrin for at indlæse vejledende UVM-tal.<br/>
+                    Tilføj selv tysk/fransk og evt. valgfag bagefter.
+                  </div>
+                </div>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(72px, 1fr))",
+                  gap: "8px",
+                  marginBottom: "16px",
+                }}>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((k) => (
+                    <button
+                      key={k}
+                      onClick={() => indlaesSkabelon(k)}
+                      style={{
+                        padding: "12px 8px",
+                        fontFamily: "'Fraunces', Georgia, serif",
+                        fontSize: "16px", fontWeight: 500, color: "#1a1a1a",
+                        background: "#f5f1ea", border: "1px solid #e0d9ca",
+                        cursor: "pointer",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = "#1a1a1a";
+                        e.currentTarget.style.color = "#f5f1ea";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "#f5f1ea";
+                        e.currentTarget.style.color = "#1a1a1a";
+                      }}
+                    >
+                      {k}.
+                    </button>
+                  ))}
+                </div>
+                <div style={{
+                  textAlign: "center", fontSize: "12px", color: "#9a9387",
+                  paddingTop: "16px", borderTop: "1px solid #f0ead9",
+                }}>
+                  eller{" "}
+                  <button
+                    onClick={tilfoejFag}
+                    style={{
+                      background: "transparent", border: "none",
+                      color: "#5a5448", cursor: "pointer",
+                      fontSize: "12px", textDecoration: "underline",
+                      padding: 0,
+                    }}
+                  >
+                    start tom og byg selv
+                  </button>
+                </div>
               </div>
             )}
 
