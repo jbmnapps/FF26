@@ -1668,10 +1668,11 @@ function SortableFagCard({
   });
   const sortableStyle = {
     // Standard sortable-grid: det aktive kort følger musen via transform.
-    // SortableContext + rectSortingStrategy animerer de andre kort til deres
-    // nye positioner.
+    // De andre kort animerer blødt til nye positioner via `transition`.
+    // Det aktive kort skal IKKE have transition på sig selv (ellers laggrer
+    // det bagefter musen med 280ms).
     transform: CSS.Transform.toString(transform),
-    transition,
+    transition: isDragging ? undefined : transition,
     opacity: isDragging ? 0.5 : 1,
     zIndex: isDragging ? 10 : "auto",
     boxShadow: isDragging ? "0 12px 32px rgba(26,26,26,0.22)" : "none",
