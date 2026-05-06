@@ -90,14 +90,32 @@ function fagForkortelse(navn) {
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1, 3).toLowerCase();
 }
 
+// Module-level map fra normaliseret navn → farve. Opdateres af Fagfordeling
+// før render baseret på lærer-listens position, så de første 15 lærere
+// garanteret får unikke farver (ingen hash-kollisioner). Fallback: simpel hash
+// for navne der ikke er i listen (fx tomme/nye lærere under redigering).
+let LAERER_FARVE_MAP = new Map();
+
 function farveForNavn(navn) {
   if (!navn || !navn.trim()) return "#cdc5b8"; // tom-tilstand
   const norm = navn.trim().toLowerCase();
+  if (LAERER_FARVE_MAP.has(norm)) return LAERER_FARVE_MAP.get(norm);
+  // Fallback hash for navne der endnu ikke er i listen
   let hash = 0;
   for (let i = 0; i < norm.length; i++) {
     hash = ((hash * 31) + norm.charCodeAt(i)) >>> 0;
   }
   return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+}
+
+function buildLaererFarveMap(oversigt) {
+  const map = new Map();
+  oversigt.forEach((l, i) => {
+    if (l.navn) {
+      map.set(l.navn.trim().toLowerCase(), AVATAR_PALETTE[i % AVATAR_PALETTE.length]);
+    }
+  });
+  return map;
 }
 
 function useIsMobile() {
@@ -530,6 +548,10 @@ export default function Fagfordeling() {
   };
 
   const oversigt = laererOversigt();
+  // Opdatér farve-map FØR render — så alle avatar-komponenter (sidebar, fag-kort,
+  // drag-overlay, mobil) ser samme position-baserede farve under samme render.
+  // Dette eliminerer hash-kollisioner mellem synlige lærere.
+  LAERER_FARVE_MAP = buildLaererFarveMap(oversigt);
 
   // Unikke eksisterende lærere (normaliseret, dedupliceret, sorteret) til autosuggest
   const eksisterendeLaerere = (() => {
