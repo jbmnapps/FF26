@@ -546,17 +546,12 @@ export default function Fagfordeling() {
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
   );
 
-  // Composed collision detection — robust for grids hvor closestCorners alene
-  // har svært ved vertikale/diagonale træk (kan vælge sidemandens hjørne i
-  // stedet for kortet nedenunder). Rækkefølge: pointer-inden-i (mest præcist),
-  // rektangel-overlap (fallback når pointer er på kant), closestCorners (sidste).
-  const collisionDetectionStrategy = React.useCallback((args) => {
-    const pointerCollisions = pointerWithin(args);
-    if (pointerCollisions.length > 0) return pointerCollisions;
-    const rectCollisions = rectIntersection(args);
-    if (rectCollisions.length > 0) return rectCollisions;
-    return closestCorners(args);
-  }, []);
+  // closestCorners alene — den finder altid den nærmeste retning, så de
+  // andre kort begynder at glide LIDT FØR musen rammer destinationen.
+  // Det giver en blød "forhandlet" overgang i stedet for et brat snap når
+  // tærsklen krydses. MeasuringStrategy.Always (på DndContext) sikrer at
+  // målingerne er friske, så der ikke kommer flip-back-glitch.
+  const collisionDetectionStrategy = closestCorners;
 
   // Aktiv drag-id til DragOverlay (sørger for at trukket lærer altid er øverst)
   const [activeDragId, setActiveDragId] = useState(null);
@@ -1665,7 +1660,12 @@ function SortableFagCard({
     }, 30);
   };
 
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: f.id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: f.id,
+    // Blødere overgang når andre kort glider på plads — føles "forhandlet"
+    // i stedet for snappy.
+    transition: { duration: 280, easing: "cubic-bezier(0.25, 1, 0.5, 1)" },
+  });
   const sortableStyle = {
     // Standard sortable-grid: det aktive kort følger musen via transform.
     // SortableContext + rectSortingStrategy animerer de andre kort til deres
