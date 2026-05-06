@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Plus, Trash2, Download, Upload, X, Users, BookOpen, AlertCircle, CheckCircle2, Circle, ChevronDown, GripVertical, RotateCcw } from "lucide-react";
-import { DndContext, DragOverlay, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, DragOverlay, closestCorners, pointerWithin, rectIntersection, MouseSensor, TouchSensor, useSensor, useSensors, MeasuringStrategy } from "@dnd-kit/core";
 import { SortableContext, useSortable, rectSortingStrategy, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
@@ -37,6 +37,55 @@ const AVATAR_PALETTE = [
   "#5a4a2a", // umbra
   "#6e5a3a", // bronze
 ];
+
+// Forkortelser til fag-tags i lærersidebaren — max 3 tegn (fx Mat, Idr, F/K).
+// Falder tilbage til de første 3 bogstaver af fagnavnet hvis ikke i tabellen.
+const FAG_FORKORTELSER = {
+  "matematik": "Mat",
+  "dansk": "Dan",
+  "engelsk": "Eng",
+  "tysk": "Tys",
+  "fransk": "Fra",
+  "spansk": "Spa",
+  "idræt": "Idr",
+  "idret": "Idr",
+  "historie": "His",
+  "geografi": "Geo",
+  "biologi": "Bio",
+  "fysik": "Fys",
+  "kemi": "Kem",
+  "fysik/kemi": "F/K",
+  "f/k": "F/K",
+  "natur/teknologi": "N/T",
+  "natur og teknologi": "N/T",
+  "n/t": "N/T",
+  "samfundsfag": "Sam",
+  "religion": "Rel",
+  "kristendom": "Kri",
+  "kristendomskundskab": "Kri",
+  "musik": "Mus",
+  "billedkunst": "BK",
+  "håndværk og design": "H&D",
+  "håndværk/design": "H&D",
+  "håndværk": "Hå",
+  "sløjd": "Slø",
+  "håndarbejde": "Hå",
+  "madkundskab": "Mad",
+  "klassens tid": "KT",
+  "klassen": "Kl",
+  "understøttende undervisning": "USU",
+  "valgfag": "Val",
+};
+
+function fagForkortelse(navn) {
+  if (!navn) return "";
+  const key = navn.trim().toLowerCase();
+  if (FAG_FORKORTELSER[key]) return FAG_FORKORTELSER[key];
+  // Fallback: første 3 tegn, første bogstav stort
+  const trimmed = navn.trim();
+  if (trimmed.length <= 3) return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1, 3).toLowerCase();
+}
 
 function farveForNavn(navn) {
   if (!navn || !navn.trim()) return "#cdc5b8"; // tom-tilstand
@@ -149,7 +198,8 @@ export default function Fagfordeling() {
   const [fag, setFag] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [showImport, setShowImport] = useState(false);
-  const [importText, setImportText] = useState("");
+  const [importFejl, setImportFejl] = useState("");
+  const importFilRef = React.useRef(null);
   const [udfoldede, setUdfoldede] = useState(new Set());
 
   // Mobil-state: hvilken tab er aktiv og hvilket fag er åbnet i bottom-sheet
@@ -300,11 +350,16 @@ export default function Fagfordeling() {
 
   const sletLaererInternal = (fagId, laererId) => {
     setFag(
-      fag.map((f) =>
-        f.id === fagId
-          ? { ...f, laerere: f.laerere.filter((l) => l.id !== laererId) }
-          : f
-      )
+      fag.map((f) => {
+        if (f.id !== fagId) return f;
+        const nyeLaerere = f.laerere.filter((l) => l.id !== laererId);
+        // Hvis sletning bringer lærer-antal under forventedeLaerere, sænk forventede
+        // så kortet skrumper naturligt (default minimum 2). Brugeren kan eksplicit
+        // sætte forventede højere igen via 1/2/3-knapperne hvis de vil holde plads.
+        const forventede = parseInt(f.forventedeLaerere) || 2;
+        const nyForventede = Math.max(2, Math.min(forventede, nyeLaerere.length));
+        return { ...f, laerere: nyeLaerere, forventedeLaerere: nyForventede };
+      })
     );
   };
 
@@ -430,17 +485,19 @@ export default function Fagfordeling() {
     URL.revokeObjectURL(url);
   };
 
-  const importer = () => {
+  const importerData = (jsonString) => {
     try {
-      const data = JSON.parse(importText);
-      if (data.fag) {
-        setKlasseNavn(data.klasseNavn || "Min klasse");
-        setFag(data.fag);
-        setShowImport(false);
-        setImportText("");
+      const data = JSON.parse(jsonString);
+      if (!data.fag) {
+        setImportFejl("Filen ser ikke ud til at være en fagfordeling.");
+        return;
       }
+      setKlasseNavn(data.klasseNavn || "Min klasse");
+      setFag(data.fag);
+      setShowImport(false);
+      setImportFejl("");
     } catch (e) {
-      alert("Kunne ikke læse filen. Tjek at det er gyldig JSON.");
+      setImportFejl("Kunne ikke læse filen. Tjek at det er en gyldig fagfordelings-fil.");
     }
   };
 
@@ -463,8 +520,10 @@ export default function Fagfordeling() {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => setImportText(ev.target.result);
+    reader.onload = (ev) => importerData(ev.target.result);
     reader.readAsText(file);
+    // Nulstil input så samme fil kan vælges igen efter en fejl
+    e.target.value = "";
   };
 
   const oversigt = laererOversigt();
@@ -487,8 +546,24 @@ export default function Fagfordeling() {
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
   );
 
+  // Composed collision detection — robust for grids hvor closestCorners alene
+  // har svært ved vertikale/diagonale træk (kan vælge sidemandens hjørne i
+  // stedet for kortet nedenunder). Rækkefølge: pointer-inden-i (mest præcist),
+  // rektangel-overlap (fallback når pointer er på kant), closestCorners (sidste).
+  const collisionDetectionStrategy = React.useCallback((args) => {
+    const pointerCollisions = pointerWithin(args);
+    if (pointerCollisions.length > 0) return pointerCollisions;
+    const rectCollisions = rectIntersection(args);
+    if (rectCollisions.length > 0) return rectCollisions;
+    return closestCorners(args);
+  }, []);
+
   // Aktiv drag-id til DragOverlay (sørger for at trukket lærer altid er øverst)
   const [activeDragId, setActiveDragId] = useState(null);
+  // Track origin-fag for lærer-drag, så vi ved hvor læreren startede når vi
+  // skal justere lektionstal ved cross-fag drop. Ref undgår re-renders.
+  const dragStartFagIdRef = React.useRef(null);
+
   const activeDragLaerer = (() => {
     if (!activeDragId) return null;
     if (fag.some((f) => f.id === activeDragId)) return null; // fag-drag
@@ -499,21 +574,86 @@ export default function Fagfordeling() {
     return null;
   })();
 
+  const activeDragFag = (() => {
+    if (!activeDragId) return null;
+    return fag.find((f) => f.id === activeDragId) || null;
+  })();
+
   const handleDragStart = ({ active }) => {
     setActiveDragId(active.id);
+    // Track origin for lærer-drags
+    const isFagDrag = fag.some((f) => f.id === active.id);
+    if (!isFagDrag) {
+      const origin = fag.find((f) => f.laerere.some((l) => l.id === active.id));
+      dragStartFagIdRef.current = origin?.id ?? null;
+    } else {
+      dragStartFagIdRef.current = null;
+    }
+  };
+
+  // handleDragOver: realtime cross-fag flytning af lærere.
+  // Når man trækker en lærer hen over et andet fag, flyttes læreren til
+  // destinationens array med det samme — så eksisterende lærere på destination
+  // shifter naturligt via SortableContext + verticalListSortingStrategy.
+  const handleDragOver = ({ active, over }) => {
+    if (!over || active.id === over.id) return;
+
+    // Skip fag-drag — gridets SortableContext + rectSortingStrategy håndterer
+    const activeIsFag = fag.some((f) => f.id === active.id);
+    if (activeIsFag) return;
+
+    const overIsFag = fag.some((f) => f.id === over.id);
+
+    // Find current source (kan være ændret af tidligere drag-over events)
+    const currentSource = fag.find((f) => f.laerere.some((l) => l.id === active.id));
+    if (!currentSource) return;
+
+    // Find target fag
+    const target = overIsFag
+      ? fag.find((f) => f.id === over.id)
+      : fag.find((f) => f.laerere.some((l) => l.id === over.id));
+    if (!target) return;
+
+    // Samme fag — lad SortableContext håndtere within-fag shuffle
+    if (target.id === currentSource.id) return;
+
+    // Cross-fag flytning
+    const movingLaerer = currentSource.laerere.find((l) => l.id === active.id);
+    let destIndex = overIsFag
+      ? target.laerere.length
+      : target.laerere.findIndex((l) => l.id === over.id);
+    if (destIndex < 0) destIndex = target.laerere.length;
+
+    setFag((prev) => prev.map((f) => {
+      if (f.id === currentSource.id) {
+        return { ...f, laerere: f.laerere.filter((l) => l.id !== active.id) };
+      }
+      if (f.id === target.id) {
+        // Forhindrer dobbelt-indsættelse ved hurtige drag-over events
+        if (f.laerere.some((l) => l.id === active.id)) return f;
+        const newLaerere = [...f.laerere];
+        newLaerere.splice(destIndex, 0, movingLaerer);
+        return { ...f, laerere: newLaerere };
+      }
+      return f;
+    }));
   };
 
   const handleDragEnd = ({ active, over }) => {
+    const activeId = active.id;
+    const startFagId = dragStartFagIdRef.current;
     setActiveDragId(null);
-    if (!over || active.id === over.id) return;
+    dragStartFagIdRef.current = null;
 
-    // Var det en fag-kort der blev trukket?
-    const activeIsFag = fag.some((f) => f.id === active.id);
+    if (!over) return;
+
+    const activeIsFag = fag.some((f) => f.id === activeId);
     const overIsFag = fag.some((f) => f.id === over.id);
 
+    // Fag-drag: reorder i grid
     if (activeIsFag) {
-      if (overIsFag) {
-        const oldIndex = fag.findIndex((f) => f.id === active.id);
+      if (overIsFag && activeId !== over.id) {
+        const oldIndex = fag.findIndex((f) => f.id === activeId);
         const newIndex = fag.findIndex((f) => f.id === over.id);
         if (oldIndex >= 0 && newIndex >= 0) {
           setFag(arrayMove(fag, oldIndex, newIndex));
@@ -522,61 +662,41 @@ export default function Fagfordeling() {
       return;
     }
 
-    // Lærer-drag: find source-fag og lærer
-    let sourceFag = null;
-    for (const f of fag) {
-      if (f.laerere.some((l) => l.id === active.id)) {
-        sourceFag = f;
-        break;
-      }
-    }
-    if (!sourceFag) return;
-    const sourceLaerer = sourceFag.laerere.find((l) => l.id === active.id);
+    // Lærer-drag: handleDragOver har allerede flyttet læreren til destination.
+    // Vi håndterer her: (a) within-fag reorder, (b) lektionstal-justering ved cross-fag.
+    const currentFag = fag.find((f) => f.laerere.some((l) => l.id === activeId));
+    if (!currentFag) return;
 
-    // Find destination-fag og index
-    let destFag = null;
-    let destIndex = -1;
-    if (overIsFag) {
-      // Slippet på et fag-kort direkte → tilføj til slutningen
-      destFag = fag.find((f) => f.id === over.id);
-      destIndex = destFag.laerere.length;
-    } else {
-      // Slippet på en anden lærer
-      for (const f of fag) {
-        const idx = f.laerere.findIndex((l) => l.id === over.id);
-        if (idx >= 0) {
-          destFag = f;
-          destIndex = idx;
-          break;
+    // Within-fag reorder (drop på en anden lærer i samme fag)
+    if (!overIsFag) {
+      const overFag = fag.find((f) => f.laerere.some((l) => l.id === over.id));
+      if (overFag && overFag.id === currentFag.id) {
+        const sourceIdx = currentFag.laerere.findIndex((l) => l.id === activeId);
+        const destIdx = currentFag.laerere.findIndex((l) => l.id === over.id);
+        if (sourceIdx >= 0 && destIdx >= 0 && sourceIdx !== destIdx) {
+          setFag((prev) => prev.map((f) =>
+            f.id === currentFag.id
+              ? { ...f, laerere: arrayMove(f.laerere, sourceIdx, destIdx) }
+              : f
+          ));
         }
       }
     }
-    if (!destFag) return;
 
-    // Samme fag → reorder
-    if (sourceFag.id === destFag.id) {
-      const sourceIdx = sourceFag.laerere.findIndex((l) => l.id === active.id);
-      if (sourceIdx === destIndex) return;
-      setFag(fag.map((f) =>
-        f.id === sourceFag.id
-          ? { ...f, laerere: arrayMove(f.laerere, sourceIdx, destIndex) }
+    // Cross-fag → sæt lærerens lektioner til destination-fagets lektionsantal
+    if (startFagId && currentFag.id !== startFagId) {
+      const fagLekt = parseInt(currentFag.lektioner) || 0;
+      setFag((prev) => prev.map((f) =>
+        f.id === currentFag.id
+          ? {
+              ...f,
+              laerere: f.laerere.map((l) =>
+                l.id === activeId ? { ...l, lektioner: fagLekt } : l
+              ),
+            }
           : f
       ));
-      return;
     }
-
-    // Cross-fag → fjern fra source, indsæt i dest
-    setFag(fag.map((f) => {
-      if (f.id === sourceFag.id) {
-        return { ...f, laerere: f.laerere.filter((l) => l.id !== sourceLaerer.id) };
-      }
-      if (f.id === destFag.id) {
-        const newLaerere = [...f.laerere];
-        newLaerere.splice(destIndex, 0, sourceLaerer);
-        return { ...f, laerere: newLaerere };
-      }
-      return f;
-    }));
   };
 
   const statusFarver = {
@@ -873,13 +993,12 @@ export default function Fagfordeling() {
           marginBottom: "24px",
         }}>
           <StatBox label="Lærere på klassen" value={oversigt.length} sub="i alt" />
-          <div style={{ gridColumn: "span 2" }}>
-            <StatusBox samletMangler={samletMangler} samletOver={samletOver} antalFag={fag.length} />
-          </div>
+          <StatBox label="Lektioner" value={samletLektioner} sub="i alt" />
+          <StatusBox samletMangler={samletMangler} samletOver={samletOver} antalFag={fag.length} />
         </div>
 
         {/* Hovedindhold: 2 kolonner — fag fylder, lærer-sidebar er kompakt fast bredde */}
-        <div className="main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 240px", gap: "32px", alignItems: "start" }}>
+        <div className="main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 264px", gap: "16px", alignItems: "start" }}>
           {/* Venstre: Fag */}
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "10px" }}>
@@ -905,12 +1024,19 @@ export default function Fagfordeling() {
               </div>
             )}
 
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={collisionDetectionStrategy}
+              measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDragEnd={handleDragEnd}
+            >
               <SortableContext items={fag.map((f) => f.id)} strategy={rectSortingStrategy}>
                 <div className="fag-grid" style={{
                   display: "grid",
                   gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-                  gap: "10px",
+                  gap: "14px",
                   alignItems: "start",
                 }}>
                   {fag.map((f) => {
@@ -964,6 +1090,36 @@ export default function Fagfordeling() {
                       {activeDragLaerer.navn}
                     </span>
                   </div>
+                ) : activeDragFag ? (
+                  <div style={{
+                    background: "#fff",
+                    border: "1px solid #1a1a1a",
+                    boxShadow: "0 12px 32px rgba(26,26,26,0.22)",
+                    padding: "14px 14px 12px 14px",
+                    cursor: "grabbing",
+                    minWidth: "260px",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                      <span style={{
+                        fontFamily: "'Fraunces', Georgia, serif",
+                        fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
+                        flex: 1, minWidth: 0, overflow: "hidden",
+                        textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {activeDragFag.navn || "Fag"}
+                      </span>
+                      <span style={{
+                        fontFamily: "'Fraunces', Georgia, serif",
+                        fontSize: "16px", fontWeight: 500, color: "#5a5448",
+                        flexShrink: 0,
+                      }}>
+                        {activeDragFag.lektioner || 0}
+                      </span>
+                      <span style={{ fontSize: "12px", color: "#9a9387", flexShrink: 0 }}>
+                        lektioner
+                      </span>
+                    </div>
+                  </div>
                 ) : null}
               </DragOverlay>
             </DndContext>
@@ -986,66 +1142,81 @@ export default function Fagfordeling() {
 
           {/* Højre: Lærer-oversigt */}
           <aside className="laerere-aside" style={{ position: "sticky", top: "24px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "10px" }}>
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "baseline",
+              padding: "0 14px", marginBottom: "4px",
+            }}>
               <h2 style={{
                 fontFamily: "'Fraunces', Georgia, serif", fontSize: "20px",
                 fontWeight: 600, color: "#1a1a1a", margin: 0,
               }}>
                 Lærere
               </h2>
-              <span style={{ fontSize: "12px", color: "#7a7367", fontWeight: 500 }}>
+              <span style={{ fontSize: "12px", color: "#9a9387", fontWeight: 500 }}>
                 {oversigt.length} i alt
               </span>
             </div>
 
-            <div style={{ background: "#fff", border: "1px solid #e0d9ca" }}>
+            <div style={{ background: "transparent" }}>
               {oversigt.length === 0 ? (
-                <div style={{ padding: "32px 20px", textAlign: "center", color: "#7a7367" }}>
+                <div style={{ padding: "32px 14px", textAlign: "center", color: "#9a9387" }}>
                   <Users size={24} style={{ marginBottom: "8px", opacity: 0.5 }} />
                   <div style={{ fontSize: "13px" }}>Ingen lærere endnu</div>
                 </div>
               ) : (
                 oversigt.map((l, i) => (
                   <div key={l.navn} className="laerer-item" style={{
-                    padding: "8px 14px",
-                    borderBottom: i < oversigt.length - 1 ? "1px solid #f0ead9" : "none",
+                    padding: "10px 14px",
                   }}>
                     <div className="laerer-item-row" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                       <div className="laerer-avatar" style={{
-                        width: "24px", height: "24px", borderRadius: "50%",
+                        width: "18px", height: "18px", borderRadius: "50%",
                         background: farveForNavn(l.navn), color: "#fff",
-                        fontSize: "11px", fontWeight: 600,
+                        fontSize: "10px", fontWeight: 600,
                         display: "flex", alignItems: "center", justifyContent: "center",
                         flexShrink: 0,
+                        alignSelf: "flex-start",
+                        marginTop: "1px",
                       }}>
                         {l.navn.charAt(0).toUpperCase()}
                       </div>
-                      <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "baseline", gap: "8px" }}>
-                        <div className="laerer-navn" style={{
+
+                      <div style={{
+                        flex: 1, minWidth: 0,
+                        display: "flex", flexWrap: "wrap", alignItems: "center",
+                        gap: "6px 8px",
+                      }}>
+                        <span className="laerer-navn" style={{
                           fontSize: "13px", fontWeight: 600, color: "#1a1a1a",
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          lineHeight: 1.2,
                         }}>
                           {l.navn}
-                        </div>
+                        </span>
+                        {l.fag.map((fa, j) => (
+                          <span key={j} title={fa.fagNavn} style={{
+                            fontSize: "11px",
+                            color: "#9a9387",
+                            fontWeight: 400,
+                            lineHeight: 1.3,
+                            whiteSpace: "nowrap",
+                          }}>
+                            {fagForkortelse(fa.fagNavn)}{" "}
+                            <span style={{ color: "#5a5448" }}>
+                              {fa.lektioner}
+                            </span>
+                          </span>
+                        ))}
                       </div>
                       <div className="laerer-total" style={{
-                        fontFamily: "'Fraunces', Georgia, serif",
-                        fontSize: "16px", fontWeight: 600, color: "#1a1a1a",
+                        fontSize: "13px", fontWeight: 500, color: "#1a1a1a",
+                        lineHeight: 1.2,
+                        fontVariantNumeric: "tabular-nums",
+                        minWidth: "28px", textAlign: "right",
+                        alignSelf: "flex-start",
+                        marginTop: "1px",
                       }}>
                         {l.total}
                       </div>
-                    </div>
-                    <div className="laerer-fag-tags" style={{ display: "none", paddingLeft: "38px", flexWrap: "wrap", gap: "4px" }}>
-                      {l.fag.map((fa, j) => (
-                        <span key={j} style={{
-                          fontSize: "11px",
-                          color: "#5a5448",
-                          background: "#f5f1ea",
-                          padding: "2px 8px",
-                        }}>
-                          {fa.fagNavn} · {fa.lektioner}
-                        </span>
-                      ))}
                     </div>
                   </div>
                 ))
@@ -1101,37 +1272,46 @@ export default function Fagfordeling() {
                 Importér fagfordeling
               </h3>
               <button
-                onClick={() => { setShowImport(false); setImportText(""); }}
+                onClick={() => { setShowImport(false); setImportFejl(""); }}
                 style={{ background: "transparent", border: "none", cursor: "pointer", padding: "4px" }}
               >
                 <X size={18} />
               </button>
             </div>
             <div style={{ padding: "20px" }}>
-              <p style={{ fontSize: "13px", color: "#5a5448", marginTop: 0, marginBottom: "12px" }}>
-                Vælg en eksporteret fil eller indsæt JSON-data direkte.
+              <p style={{ fontSize: "13px", color: "#5a5448", marginTop: 0, marginBottom: "16px" }}>
+                Vælg en tidligere eksporteret fagfordelings-fil (.json).
+                Den nuværende klasse bliver erstattet.
               </p>
               <input
-                type="file" accept=".json"
+                ref={importFilRef}
+                type="file" accept=".json,application/json"
                 onChange={haandterFil}
-                style={{
-                  marginBottom: "12px", width: "100%", fontSize: "13px",
-                  padding: "8px", background: "#fff", border: "1px solid #e0d9ca",
-                }}
+                style={{ display: "none" }}
               />
-              <textarea
-                value={importText}
-                onChange={(e) => setImportText(e.target.value)}
-                placeholder="Eller indsæt JSON-data her..."
+              <button
+                onClick={() => importFilRef.current?.click()}
                 style={{
-                  width: "100%", minHeight: "120px", padding: "10px",
-                  fontSize: "12px", fontFamily: "ui-monospace, monospace",
-                  background: "#fff", border: "1px solid #e0d9ca", resize: "vertical",
+                  width: "100%", padding: "14px 16px", fontSize: "14px", fontWeight: 500,
+                  background: "#1a1a1a", border: "1px solid #1a1a1a", color: "#f5f1ea",
+                  cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
                 }}
-              />
+              >
+                <Upload size={16} /> Vælg arkiv
+              </button>
+              {importFejl && (
+                <div style={{
+                  marginTop: "12px", padding: "10px 12px",
+                  background: "#fbe9e7", border: "1px solid #c9442f",
+                  fontSize: "12px", color: "#7a2517",
+                }}>
+                  {importFejl}
+                </div>
+              )}
               <div style={{ display: "flex", gap: "8px", marginTop: "16px", justifyContent: "flex-end" }}>
                 <button
-                  onClick={() => { setShowImport(false); setImportText(""); }}
+                  onClick={() => { setShowImport(false); setImportFejl(""); }}
                   style={{
                     padding: "10px 16px", fontSize: "13px", fontWeight: 500,
                     background: "transparent", border: "1px solid #1a1a1a",
@@ -1139,18 +1319,6 @@ export default function Fagfordeling() {
                   }}
                 >
                   Annullér
-                </button>
-                <button
-                  onClick={importer}
-                  disabled={!importText.trim()}
-                  style={{
-                    padding: "10px 16px", fontSize: "13px", fontWeight: 500,
-                    background: importText.trim() ? "#1a1a1a" : "#cdc5b8",
-                    border: "1px solid #1a1a1a", color: "#f5f1ea",
-                    cursor: importText.trim() ? "pointer" : "not-allowed",
-                  }}
-                >
-                  Importér
                 </button>
               </div>
             </div>
@@ -1400,7 +1568,7 @@ function SortableLaererRow({
         ...sortStyle,
       }}>
         <div {...listeners} style={{
-          width: "20px", height: "20px", borderRadius: "50%",
+          width: "18px", height: "18px", borderRadius: "50%",
           background: farveForNavn(l.navn),
           color: "#fff", fontSize: "10px", fontWeight: 600,
           display: "flex", alignItems: "center", justifyContent: "center",
@@ -1435,7 +1603,7 @@ function SortableLaererRow({
       ...sortStyle,
     }}>
       <div {...listeners} style={{
-        width: "20px", height: "20px", borderRadius: "50%",
+        width: "18px", height: "18px", borderRadius: "50%",
         background: l.navn ? farveForNavn(l.navn) : "#cdc5b8",
         color: "#fff", fontSize: "10px", fontWeight: 600,
         display: "flex", alignItems: "center", justifyContent: "center",
@@ -1489,7 +1657,7 @@ function SortableLaererRow({
           flexShrink: 0,
         }}
       />
-      <span style={{ fontSize: "12px", color: "#7a7367", flexShrink: 0 }}>lekt.</span>
+      <span style={{ fontSize: "12px", color: "#9a9387", flexShrink: 0 }}>lek</span>
       {allowDelete && (
         <button
           onClick={() => sletLaerer(fagId, l.id)}
@@ -1534,11 +1702,12 @@ function SortableFagCard({
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: f.id });
   const sortableStyle = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.6 : 1,
+    // Når kortet trækkes: bliv stille på plads (DragOverlay følger musen).
+    // De andre kort shuffler omkring en stabil tom slot — uden glitch.
+    transform: isDragging ? undefined : CSS.Transform.toString(transform),
+    transition: isDragging ? undefined : transition,
+    opacity: isDragging ? 0 : 1,
     zIndex: isDragging ? 10 : "auto",
-    boxShadow: isDragging ? "0 8px 24px rgba(26,26,26,0.18)" : "none",
   };
 
   return (
@@ -1554,8 +1723,8 @@ function SortableFagCard({
     >
       {/* Header — fagnavn (auto-bredde), drag-zone, lektionstal, status, chevron */}
       <div className="fag-card-header" style={{
-        padding: "14px 10px 8px 16px",
-        display: "flex", alignItems: "center", gap: "6px",
+        padding: "14px 10px 10px 14px",
+        display: "flex", alignItems: "center", gap: "4px",
       }}>
         {/* Fagnavn — auto-bredde, kun teksten er klikbar */}
         <GhostInput
@@ -1641,7 +1810,7 @@ function SortableFagCard({
         >
           {status === "grøn" && <CheckCircle2 size={18} />}
           {status === "rød" && <AlertCircle size={18} />}
-          {status === "gul" && <Circle size={18} fill={farve.border} strokeWidth={0} />}
+          {status === "gul" && <Circle size={18} strokeWidth={2} />}
           {status === "over" && <AlertCircle size={18} />}
         </div>
 
@@ -1650,7 +1819,7 @@ function SortableFagCard({
           onClick={() => toggleUdfoldet(f.id)}
           className="icon-btn"
           style={{
-            padding: "6px", background: "transparent",
+            padding: "4px", background: "transparent",
             border: "none", cursor: "pointer", color: "#9a9387",
             flexShrink: 0,
           }}
@@ -1674,7 +1843,7 @@ function SortableFagCard({
         const forventede = parseInt(f.forventedeLaerere) || 2;
         const emptyCount = Math.max(0, forventede - namedLaerere.length);
         return (
-          <div style={{ borderTop: "1px solid #f0ead9", padding: "6px 14px 8px" }}>
+          <div style={{ borderTop: "1px solid #f0ead9", padding: "6px 14px 10px" }}>
             <SortableContext
               items={namedLaerere.map((l) => l.id)}
               strategy={verticalListSortingStrategy}
@@ -1692,12 +1861,12 @@ function SortableFagCard({
 
       {/* Udfoldet indhold */}
       {erUdfoldet && (
-        <div style={{ borderTop: "1px solid #f0ead9", padding: "10px 18px 14px" }}>
+        <div style={{ borderTop: "1px solid #f0ead9", padding: "10px 14px 12px" }}>
           {/* Antal lærere forventet på faget */}
           <div style={{
             display: "flex", alignItems: "center", gap: "10px",
             paddingBottom: "10px", marginBottom: "10px",
-            borderBottom: "1px dashed #f0ead9",
+            borderBottom: "1px solid #f0ead9",
           }}>
             <span style={{ fontSize: "12px", color: "#7a7367", flexShrink: 0 }}>
               Antal lærere på faget:
@@ -1724,11 +1893,6 @@ function SortableFagCard({
                 );
               })}
             </div>
-            {statusInfo.manglerLaerere > 0 && (
-              <span style={{ fontSize: "11px", color: "#7a5400", marginLeft: "auto" }}>
-                Mangler {statusInfo.manglerLaerere} lærer{statusInfo.manglerLaerere === 1 ? "" : "e"}
-              </span>
-            )}
           </div>
 
           <SortableContext
@@ -1753,8 +1917,8 @@ function SortableFagCard({
 
           <div style={{
             display: "flex", justifyContent: "space-between",
-            alignItems: "center", marginTop: "8px",
-            paddingTop: "8px", borderTop: "1px dashed #f0ead9",
+            alignItems: "center", marginTop: "10px",
+            paddingTop: "10px", borderTop: "1px solid #f0ead9",
           }}>
             {f.laerere.length < 3 ? (
               <button
@@ -1762,7 +1926,7 @@ function SortableFagCard({
                 style={{
                   display: "flex", alignItems: "center", gap: "6px",
                   padding: "4px 0",
-                  fontSize: "13px", fontWeight: 500, color: "#2d5016",
+                  fontSize: "13px", fontWeight: 500, color: "#5a5448",
                   background: "transparent", border: "none", cursor: "pointer",
                 }}
               >
