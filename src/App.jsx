@@ -218,17 +218,14 @@ function fagForkortelse(navn) {
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1, 3).toLowerCase();
 }
 
-// Module-level map fra normaliseret navn → farve. Opdateres af Fagfordeling
-// før render baseret på lærer-listens position, så de første 15 lærere
-// garanteret får unikke farver (ingen hash-kollisioner). Fallback: simpel hash
-// for navne der ikke er i listen (fx tomme/nye lærere under redigering).
+// Module-level maps fra normaliseret navn → farve. Bygges via useMemo i
+// Fagfordeling-komponenten, så de kun rebygges når input ændrer sig.
+// Position-baseret tildeling sikrer ingen hash-kollisioner mellem synlige.
+// Fallback (hash) bruges kun for navne der endnu ikke er i listen.
 let LAERER_FARVE_MAP = new Map();
+let KLASSE_FARVE_MAP = new Map();
 
-function farveForNavn(navn) {
-  if (!navn || !navn.trim()) return "#cdc5b8"; // tom-tilstand
-  const norm = navn.trim().toLowerCase();
-  if (LAERER_FARVE_MAP.has(norm)) return LAERER_FARVE_MAP.get(norm);
-  // Fallback hash for navne der endnu ikke er i listen
+function hashFarve(norm) {
   let hash = 0;
   for (let i = 0; i < norm.length; i++) {
     hash = ((hash * 31) + norm.charCodeAt(i)) >>> 0;
@@ -236,11 +233,35 @@ function farveForNavn(navn) {
   return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
 }
 
+function farveForNavn(navn) {
+  if (!navn || !navn.trim()) return "#cdc5b8"; // tom-tilstand
+  const norm = navn.trim().toLowerCase();
+  if (LAERER_FARVE_MAP.has(norm)) return LAERER_FARVE_MAP.get(norm);
+  return hashFarve(norm);
+}
+
+function farveForKlasse(klasse) {
+  if (!klasse || !klasse.trim()) return "#cdc5b8";
+  const norm = klasse.trim().toLowerCase();
+  if (KLASSE_FARVE_MAP.has(norm)) return KLASSE_FARVE_MAP.get(norm);
+  return hashFarve(norm);
+}
+
 function buildLaererFarveMap(oversigt) {
   const map = new Map();
   oversigt.forEach((l, i) => {
     if (l.navn) {
       map.set(l.navn.trim().toLowerCase(), AVATAR_PALETTE[i % AVATAR_PALETTE.length]);
+    }
+  });
+  return map;
+}
+
+function buildKlasseFarveMap(klasseNavne) {
+  const map = new Map();
+  klasseNavne.forEach((navn, i) => {
+    if (navn) {
+      map.set(navn.trim().toLowerCase(), AVATAR_PALETTE[i % AVATAR_PALETTE.length]);
     }
   });
   return map;
@@ -411,6 +432,9 @@ export default function Fagfordeling() {
   const [tilfoejNavnAaben, setTilfoejNavnAaben] = useState(false);
   const [nytLaererNavn, setNytLaererNavn] = useState("");
   const [importFejl, setImportFejl] = useState("");
+  // Vises som toast nederst hvis localStorage.setItem fejler (typisk quota fyldt
+  // eller Safari Privat tilstand). Rydder selv efter 6 sekunder.
+  const [gemFejlet, setGemFejlet] = useState(false);
   const importFilRef = React.useRef(null);
   const [udfoldede, setUdfoldede] = useState(new Set());
 
@@ -490,10 +514,19 @@ export default function Fagfordeling() {
         "fagfordeling-data",
         JSON.stringify({ version: 2, klasser, aktivKlasseId, mig, visning })
       );
+      if (gemFejlet) setGemFejlet(false);
     } catch (e) {
       console.error("Kunne ikke gemme:", e);
+      setGemFejlet(true);
     }
   }, [klasser, aktivKlasseId, mig, visning, loaded]);
+
+  // Auto-skjul gem-fejl-toast efter 6 sekunder
+  useEffect(() => {
+    if (!gemFejlet) return;
+    const t = setTimeout(() => setGemFejlet(false), 6000);
+    return () => clearTimeout(t);
+  }, [gemFejlet]);
 
   const tilfoejFag = () => {
     const fagId = nytId();
@@ -1034,7 +1067,7 @@ export default function Fagfordeling() {
   };
 
   // MIN-OVERSIGT: derived data
-  const migOversigt = (() => {
+  const migOversigt = useMemo(() => {
     const map = {};
     mig.fag.forEach(f => {
       const klasse = (f.klasse || "").trim();
@@ -1045,7 +1078,7 @@ export default function Fagfordeling() {
       map[klasse].fag.push({ navn: f.navn || "Uden navn", lektioner: lekt });
     });
     return Object.values(map).sort((a, b) => b.total - a.total);
-  })();
+  }, [mig.fag]);
   const migSamletLektioner = mig.fag.reduce((s, f) => s + (parseInt(f.lektioner) || 0), 0);
   const migAntalKlasser = migOversigt.length;
   const migMangler = mig.maalLektioner !== null ? mig.maalLektioner - migSamletLektioner : null;
@@ -1080,21 +1113,38 @@ export default function Fagfordeling() {
     e.target.value = "";
   };
 
-  const oversigt = laererOversigt();
-  // Opdatér farve-map FØR render — så alle avatar-komponenter (sidebar, fag-kort,
-  // drag-overlay, mobil) ser samme position-baserede farve under samme render.
-  // Dette eliminerer hash-kollisioner mellem synlige lærere.
-  LAERER_FARVE_MAP = buildLaererFarveMap(oversigt);
+  const oversigt = useMemo(() => laererOversigt(), [fag, pendingNavne]);
+  // Byg farve-maps via useMemo — kun når input faktisk ændrer sig.
+  // Position-baseret tildeling sikrer at de første 20 lærere/klasser har
+  // unikke farver. Mutation af module-level maps sker indenfor useMemo så
+  // child-komponenter ser samme værdier i samme render-pass.
+  const laererFarveMap = useMemo(() => buildLaererFarveMap(oversigt), [oversigt]);
+  const klasseNavneFraMin = useMemo(() => {
+    const set = new Set();
+    const ordnet = [];
+    migOversigt.forEach(o => {
+      const k = (o.klasse || "").trim().toLowerCase();
+      if (k && !set.has(k)) { set.add(k); ordnet.push(o.klasse); }
+    });
+    pendingKlasser.forEach(k => {
+      const n = (k || "").trim().toLowerCase();
+      if (n && !set.has(n)) { set.add(n); ordnet.push(k); }
+    });
+    return ordnet;
+  }, [migOversigt, pendingKlasser]);
+  const klasseFarveMap = useMemo(() => buildKlasseFarveMap(klasseNavneFraMin), [klasseNavneFraMin]);
+  LAERER_FARVE_MAP = laererFarveMap;
+  KLASSE_FARVE_MAP = klasseFarveMap;
 
   // Unikke eksisterende lærere (normaliseret, dedupliceret, sorteret) til autosuggest
-  const eksisterendeLaerere = (() => {
+  const eksisterendeLaerere = useMemo(() => {
     const map = new Map();
     fag.forEach(f => f.laerere.forEach(l => {
       const norm = normalizeNavn(l.navn);
       if (norm) map.set(norm.toLowerCase(), norm);
     }));
     return [...map.values()].sort((a, b) => a.localeCompare(b, "da"));
-  })();
+  }, [fag]);
 
   // Drag-and-drop sensors: musen skal trække 8px før drag starter (forhindrer
   // utilsigtede drags ved klik på inputs); touch venter 200ms (long-press),
@@ -2508,7 +2558,7 @@ export default function Fagfordeling() {
                   }}>
                     <div style={{
                       width: "22px", height: "22px", borderRadius: "50%",
-                      background: farveForNavn(activeMinDrag.slice("klasse:".length)),
+                      background: farveForKlasse(activeMinDrag.slice("klasse:".length)),
                       color: "#fff", fontSize: "11px", fontWeight: 600,
                       display: "flex", alignItems: "center", justifyContent: "center",
                       flexShrink: 0,
@@ -2857,6 +2907,49 @@ export default function Fagfordeling() {
           farligt
         />
       )}
+
+      {/* Toast: gem-fejl (localStorage quota / Safari Privat) */}
+      {gemFejlet && (
+        <div
+          role="status"
+          style={{
+            position: "fixed",
+            bottom: "20px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#1a1a1a",
+            color: "#f5f1ea",
+            padding: "12px 18px",
+            fontSize: "13px",
+            fontWeight: 500,
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+            zIndex: 1000,
+            animation: "fadeIn 0.2s ease",
+            maxWidth: "90vw",
+          }}
+        >
+          <AlertCircle size={16} />
+          <span>Kunne ikke gemme — eksportér som backup eller frigør plads.</span>
+          <button
+            onClick={() => setGemFejlet(false)}
+            aria-label="Luk"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "#f5f1ea",
+              cursor: "pointer",
+              padding: "0 0 0 6px",
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2935,7 +3028,7 @@ function SidebarKlasseRow({ klasse, total, fag, pending = false }) {
             className="laerer-avatar"
             style={{
               width: "24px", height: "24px", borderRadius: "50%",
-              background: farveForNavn(klasse), color: "#fff",
+              background: farveForKlasse(klasse), color: "#fff",
               fontSize: "11px", fontWeight: 600,
               display: "flex", alignItems: "center", justifyContent: "center",
               flexShrink: 0,
@@ -3143,7 +3236,7 @@ function MinFagCard({ f, opdater, slet }) {
             className="laerer-avatar"
             style={{
               width: "26px", height: "26px", borderRadius: "50%",
-              background: harKlasse ? farveForNavn(f.klasse) : "transparent",
+              background: harKlasse ? farveForKlasse(f.klasse) : "transparent",
               color: "#fff",
               fontSize: "10px", fontWeight: 600,
               display: "flex", alignItems: "center", justifyContent: "center",
