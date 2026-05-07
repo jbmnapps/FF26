@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Trash2, Download, Upload, X, Users, BookOpen, AlertCircle, CheckCircle2, Circle, ChevronDown, GripVertical, RotateCcw } from "lucide-react";
+import { Plus, Trash2, Download, Upload, X, Users, BookOpen, AlertCircle, CheckCircle2, Circle, ChevronDown, GripVertical, RotateCcw, Menu, Pencil, Check } from "lucide-react";
 import { DndContext, DragOverlay, closestCorners, pointerWithin, rectIntersection, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, MeasuringStrategy } from "@dnd-kit/core";
 import { SortableContext, useSortable, rectSortingStrategy, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -336,13 +336,45 @@ function GhostInput({ value, onChange, suggestions = [], style, wrapperStyle, cl
 }
 
 export default function Fagfordeling() {
-  const [klasseNavn, setKlasseNavn] = useState("Min klasse");
-  const [fag, setFag] = useState([]);
+  // MULTI-CLASS: Source of truth er `klasser` + `aktivKlasseId`. `klasseNavn` og
+  // `fag` er afledte views af den aktive klasse, og `setKlasseNavn` / `setFag`
+  // er wrappere der opdaterer den aktive klasse inde i `klasser`-arrayet. På
+  // den måde virker al eksisterende kode der kalder setFag / setKlasseNavn
+  // uden ændringer.
+  const [klasser, setKlasser] = useState([]);
+  const [aktivKlasseId, setAktivKlasseId] = useState(null);
   const [loaded, setLoaded] = useState(false);
+
+  const aktivKlasse = klasser.find(k => k.id === aktivKlasseId) || klasser[0] || null;
+  const klasseNavn = aktivKlasse?.navn ?? "Min klasse";
+  const fag = aktivKlasse?.fag ?? [];
+
+  const setKlasseNavn = (nytNavn) => {
+    setKlasser(prev => prev.map(k =>
+      k.id === aktivKlasseId
+        ? { ...k, navn: typeof nytNavn === "function" ? nytNavn(k.navn) : nytNavn }
+        : k
+    ));
+  };
+
+  const setFag = (nytFag) => {
+    setKlasser(prev => prev.map(k =>
+      k.id === aktivKlasseId
+        ? { ...k, fag: typeof nytFag === "function" ? nytFag(k.fag) : nytFag }
+        : k
+    ));
+  };
+
   // Empty-state-flow: når brugeren har valgt klassetrin men endnu ikke
   // valgt typisk antal lærere, viser vi spørgsmålet i stedet for klassetrin-grid.
   const [valgtKlassetrin, setValgtKlassetrin] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  // MULTI-CLASS: Hamburger-menu state
+  const [menuAaben, setMenuAaben] = useState(false);
+  const [omdoeberKlasseId, setOmdoeberKlasseId] = useState(null);
+  const [omdoebNavn, setOmdoebNavn] = useState("");
+  // EXPORT-MENU: dropdown med valg mellem JSON-fil og PDF (browser-print)
+  const [eksportMenuAaben, setEksportMenuAaben] = useState(false);
   // Pending lærer-navne: tilføjet via sidebar-knappen, men endnu ikke placeret
   // på et fag. Vises i sidebaren med total=0 så de kan trækkes til fag.
   const [pendingNavne, setPendingNavne] = useState([]);
@@ -364,16 +396,48 @@ export default function Fagfordeling() {
       const raw = localStorage.getItem("fagfordeling-data");
       if (raw) {
         const data = JSON.parse(raw);
-        setKlasseNavn(data.klasseNavn || "Min klasse");
-        // Migrér eksisterende data: ældre fag har ikke forventedeLaerere — default 2
-        const migreredeFag = (data.fag || []).map((f) => ({
-          ...f,
-          forventedeLaerere: f.forventedeLaerere ?? 2,
-        }));
-        setFag(migreredeFag);
+        // MULTI-CLASS: Migration fra gammel shape `{ klasseNavn, fag }` til ny
+        // `{ klasser: [...], aktivKlasseId }`. Pak gammel data ind som første klasse.
+        if (Array.isArray(data.klasser) && data.klasser.length > 0) {
+          const migreredeKlasser = data.klasser.map(k => ({
+            ...k,
+            fag: (k.fag || []).map(f => ({
+              ...f,
+              forventedeLaerere: f.forventedeLaerere ?? 2,
+            })),
+          }));
+          setKlasser(migreredeKlasser);
+          const aktivId = data.aktivKlasseId && migreredeKlasser.some(k => k.id === data.aktivKlasseId)
+            ? data.aktivKlasseId
+            : migreredeKlasser[0].id;
+          setAktivKlasseId(aktivId);
+        } else if (data.fag) {
+          // Gammel shape — wrap som første klasse
+          const id = Date.now();
+          const migreredeFag = (data.fag || []).map(f => ({
+            ...f,
+            forventedeLaerere: f.forventedeLaerere ?? 2,
+          }));
+          const klasseEn = { id, navn: data.klasseNavn || "Min klasse", fag: migreredeFag };
+          setKlasser([klasseEn]);
+          setAktivKlasseId(id);
+        } else {
+          // Korrupt eller tom data — opret default klasse
+          const id = Date.now();
+          setKlasser([{ id, navn: "Min klasse", fag: [] }]);
+          setAktivKlasseId(id);
+        }
+      } else {
+        // Første gang — opret default klasse
+        const id = Date.now();
+        setKlasser([{ id, navn: "Min klasse", fag: [] }]);
+        setAktivKlasseId(id);
       }
     } catch (e) {
-      // ingen data endnu eller korrupt — det er fint
+      // Korrupt data — opret default klasse
+      const id = Date.now();
+      setKlasser([{ id, navn: "Min klasse", fag: [] }]);
+      setAktivKlasseId(id);
     }
     setLoaded(true);
   }, []);
@@ -384,12 +448,12 @@ export default function Fagfordeling() {
     try {
       localStorage.setItem(
         "fagfordeling-data",
-        JSON.stringify({ klasseNavn, fag })
+        JSON.stringify({ version: 2, klasser, aktivKlasseId })
       );
     } catch (e) {
       console.error("Kunne ikke gemme:", e);
     }
-  }, [klasseNavn, fag, loaded]);
+  }, [klasser, aktivKlasseId, loaded]);
 
   const tilfoejFag = () => {
     const nytId = Date.now();
@@ -650,14 +714,18 @@ export default function Fagfordeling() {
   );
   const fuldtDækkede = fag.filter((f) => fagStatus(f).status === "grøn").length;
 
-  // Samlet manglende lærer-lektioner: for hvert fag, kombinerer manglende lektioner
-  // (sum < fagLekt) og manglende lærere (hver manglende lærer ≈ fagLekt).
+  // Samlet manglende lærer-lektioner: team-teaching-model.
+  // Target pr. fag = fagLekt × antal lærere (forventede eller faktisk navngivne, alt efter
+  // hvad der er størst). Mangler = target − sum af navngivne lærer-lektioner.
+  // Eksempel: 27 lektioner i alt, 2 forventede lærere pr. fag, ingen navngivne → 2×27 = 54 mangler.
   const samletMangler = fag.reduce((acc, f) => {
-    const info = fagStatus(f);
     const fagLekt = parseInt(f.lektioner) || 0;
-    const lektionDeficit = Math.max(0, fagLekt - info.sum);
-    const laererDeficit = info.manglerLaerere * fagLekt;
-    return acc + lektionDeficit + laererDeficit;
+    const forventedeLaerere = parseInt(f.forventedeLaerere) || 2;
+    const navngivne = f.laerere.filter(l => l.navn.trim());
+    const navngivneSum = navngivne.reduce((s, l) => s + (parseInt(l.lektioner) || 0), 0);
+    const antalLaerere = Math.max(forventedeLaerere, navngivne.length);
+    const target = fagLekt * antalLaerere;
+    return acc + Math.max(0, target - navngivneSum);
   }, 0);
 
   // Samlet overdækning: hvor mange lektioner sum overskrider team-teaching-loftet
@@ -669,8 +737,9 @@ export default function Fagfordeling() {
   }, 0);
 
   // Eksport / import
-  const eksporter = () => {
-    const data = JSON.stringify({ klasseNavn, fag }, null, 2);
+  // MULTI-CLASS: JSON-eksport tager hele klasse-arrayet, så man kan dele alt på én gang.
+  const eksportSomJSON = () => {
+    const data = JSON.stringify({ version: 2, klasser, aktivKlasseId }, null, 2);
     const blob = new Blob([data], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -678,17 +747,47 @@ export default function Fagfordeling() {
     a.download = `fagfordeling-${klasseNavn.replace(/\s+/g, "-")}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    setEksportMenuAaben(false);
+  };
+
+  // PDF-eksport: bruger browserens print-dialog. CSS @media print fjerner UI-chrome
+  // (hamburger, header-knapper, drag-handles, "+ Tilføj"-knapper) så kun selve
+  // skemaet med fag og lærere printes. Brugeren vælger "Save as PDF" i dialogen.
+  const eksportSomPDF = () => {
+    setEksportMenuAaben(false);
+    // Lille delay så dropdown'en når at lukke før print-dialogen åbnes
+    setTimeout(() => window.print(), 50);
   };
 
   const importerData = (jsonString) => {
     try {
       const data = JSON.parse(jsonString);
-      if (!data.fag) {
+      // MULTI-CLASS: Accepter både ny shape (klasser-array) og gammel (én klasse).
+      if (Array.isArray(data.klasser) && data.klasser.length > 0) {
+        const migreredeKlasser = data.klasser.map(k => ({
+          ...k,
+          fag: (k.fag || []).map(f => ({
+            ...f,
+            forventedeLaerere: f.forventedeLaerere ?? 2,
+          })),
+        }));
+        setKlasser(migreredeKlasser);
+        const aktivId = data.aktivKlasseId && migreredeKlasser.some(k => k.id === data.aktivKlasseId)
+          ? data.aktivKlasseId
+          : migreredeKlasser[0].id;
+        setAktivKlasseId(aktivId);
+      } else if (data.fag) {
+        const id = Date.now();
+        const migreredeFag = data.fag.map(f => ({
+          ...f,
+          forventedeLaerere: f.forventedeLaerere ?? 2,
+        }));
+        setKlasser([{ id, navn: data.klasseNavn || "Min klasse", fag: migreredeFag }]);
+        setAktivKlasseId(id);
+      } else {
         setImportFejl("Filen ser ikke ud til at være en fagfordeling.");
         return;
       }
-      setKlasseNavn(data.klasseNavn || "Min klasse");
-      setFag(data.fag);
       setShowImport(false);
       setImportFejl("");
     } catch (e) {
@@ -696,10 +795,12 @@ export default function Fagfordeling() {
     }
   };
 
+  // MULTI-CLASS: "Start forfra" nulstiller den AKTIVE klasse, ikke alle klasser.
+  // Det er den naturlige læsning når man kan have flere klasser.
   const nulstilAlt = () => {
     setBekraeftSlet({
-      titel: "Start forfra?",
-      tekst: "Slet alt indhold (klassenavn, fag og lærere) og start fra bunden? Det kan ikke fortrydes.",
+      titel: "Start forfra på denne klasse?",
+      tekst: `Slet alt indhold i "${klasseNavn}" (fag og lærere) og start fra bunden? Det kan ikke fortrydes. Andre klasser påvirkes ikke.`,
       bekraeftTekst: "Start forfra",
       onConfirm: () => {
         setKlasseNavn("Min klasse");
@@ -709,7 +810,77 @@ export default function Fagfordeling() {
         setPendingNavne([]);
         setTilfoejNavnAaben(false);
         setNytLaererNavn("");
-        try { localStorage.removeItem("fagfordeling-data"); } catch (e) {}
+        setBekraeftSlet(null);
+      },
+    });
+  };
+
+  // MULTI-CLASS: operationer på klasse-arrayet
+  const tilfoejKlasse = () => {
+    const id = Date.now();
+    const nyKlasse = { id, navn: "Ny klasse", fag: [] };
+    setKlasser(prev => [...prev, nyKlasse]);
+    setAktivKlasseId(id);
+    setUdfoldede(new Set());
+    setValgtKlassetrin(null);
+    setPendingNavne([]);
+    setTilfoejNavnAaben(false);
+    setNytLaererNavn("");
+    setMenuAaben(false);
+  };
+
+  const skiftAktivKlasse = (id) => {
+    if (id === aktivKlasseId) {
+      setMenuAaben(false);
+      return;
+    }
+    setAktivKlasseId(id);
+    setUdfoldede(new Set());
+    setValgtKlassetrin(null);
+    setPendingNavne([]);
+    setTilfoejNavnAaben(false);
+    setNytLaererNavn("");
+    setMenuAaben(false);
+  };
+
+  const startOmdoeb = (k) => {
+    setOmdoeberKlasseId(k.id);
+    setOmdoebNavn(k.navn);
+  };
+
+  const gemOmdoeb = () => {
+    const navn = omdoebNavn.trim();
+    if (!navn) {
+      setOmdoeberKlasseId(null);
+      return;
+    }
+    setKlasser(prev => prev.map(k =>
+      k.id === omdoeberKlasseId ? { ...k, navn } : k
+    ));
+    setOmdoeberKlasseId(null);
+    setOmdoebNavn("");
+  };
+
+  const annullerOmdoeb = () => {
+    setOmdoeberKlasseId(null);
+    setOmdoebNavn("");
+  };
+
+  const sletKlasse = (k) => {
+    if (klasser.length <= 1) return; // mindst én klasse skal eksistere
+    setBekraeftSlet({
+      titel: `Slet "${k.navn}"?`,
+      tekst: `Hele klassen og alle dens fag og lærere slettes. Det kan ikke fortrydes.`,
+      bekraeftTekst: "Slet klasse",
+      onConfirm: () => {
+        const tilbage = klasser.filter(x => x.id !== k.id);
+        setKlasser(tilbage);
+        if (k.id === aktivKlasseId) {
+          setAktivKlasseId(tilbage[0].id);
+          setUdfoldede(new Set());
+          setValgtKlassetrin(null);
+          setPendingNavne([]);
+        }
         setBekraeftSlet(null);
       },
     });
@@ -963,6 +1134,31 @@ export default function Fagfordeling() {
         @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes sheetFade { from { opacity: 0; } to { opacity: 1; } }
         @keyframes sheetSlide { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        /* MULTI-CLASS: animation for klasse-menu slide-in fra venstre.
+           translate3d tvinger GPU-laget, så animationen ikke hakker selv med
+           mange listeelementer der mounter samtidig. */
+        @keyframes panelSlideLeft {
+          from { transform: translate3d(-100%, 0, 0); opacity: 0; }
+          to { transform: translate3d(0, 0, 0); opacity: 1; }
+        }
+        /* MULTI-CLASS: blød fade-in — menuen sidder bare ovenpå siden,
+           ingen slide, ingen wash. */
+        @keyframes panelFadeIn {
+          from { opacity: 0; transform: translate3d(-4px, 0, 0); }
+          to { opacity: 1; transform: translate3d(0, 0, 0); }
+        }
+        @keyframes backdropFade { from { opacity: 0; } to { opacity: 1; } }
+        .klasse-menu-aside { will-change: transform, opacity; backface-visibility: hidden; }
+        .klasse-menu-row:hover .klasse-menu-actions { opacity: 1 !important; }
+        .klasse-menu-row:hover .klasse-menu-navn { color: #1a1a1a !important; }
+        /* Aktiv klasse: en tynd lodret streg ved venstre kant + fed vægt. Ingen kasse. */
+        .klasse-menu-row.aktiv .klasse-menu-navn { font-weight: 600 !important; color: #1a1a1a !important; }
+        .klasse-menu-row.aktiv::before {
+          content: ""; position: absolute; left: 0; top: 12px; bottom: 12px;
+          width: 2px; background: #1a1a1a;
+        }
+        .klasse-menu-add { color: #5a5448; transition: color 0.12s; }
+        .klasse-menu-add:hover { color: #1a1a1a !important; }
         .fag-card { animation: fadeIn 0.25s ease; }
         .mobile-fag-tile:active { transform: scale(0.97); transition: transform 0.1s; }
         .fag-card-fagnavn { field-sizing: content; min-width: 60px; max-width: 100%; }
@@ -1002,7 +1198,137 @@ export default function Fagfordeling() {
           .laerer-navn { font-size: 13px !important; }
           .laerer-total { font-size: 16px !important; }
         }
+
+        /* === PRINT-STYLESHEET ===
+           Skal ligne en render af siden, ikke en print-renset version. Bevarer alle
+           farver, baggrunde og layout — fjerner KUN interaktive UI-elementer (knapper,
+           menu, drag-handles). Brugeren får browser-print-dialog og vælger "Save as PDF". */
+        @media print {
+          @page { size: A4 landscape; margin: 8mm; }
+
+          /* Skaler hele page-wrap'en så 11 fag + sidebar fylder én A4-side.
+             transform-origin: top left + width-kompensation gør at det skalerede
+             indhold fylder hele siden uden hvidt overflow. */
+          .page-wrap {
+            transform: scale(0.72) !important;
+            transform-origin: top left !important;
+            width: 138.9% !important;
+          }
+          /* Forhindre side-brud overhovedet i indholdet */
+          .page-wrap, .main-grid, .fag-grid, .stat-bar {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          /* Tving browseren til at bevare farver og baggrunde — ellers stripper Chrome dem */
+          *, *::before, *::after {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+          }
+
+          /* Stop animationer og transitions — de skal ikke "flashe" når print snapshottes */
+          *, *::before, *::after {
+            animation: none !important;
+            transition: none !important;
+          }
+
+          /* Skjul UI-chrome der ikke giver mening i et delbart artefakt */
+          .no-print,
+          [data-no-print="true"],
+          .header-io-btn,
+          .header-btn,
+          .klasse-menu-aside,
+          .mobile-tabs,
+          .mobile-summary-bar,
+          .stat-line,
+          .add-fag-btn,
+          .add-laerer-btn,
+          button[aria-label*="Skift klasse"],
+          button[aria-label="Luk menu"],
+          button[aria-label*="Tilføj fag"],
+          button[aria-label*="Tilføj lærer"],
+          [role="dialog"]
+          { display: none !important; }
+
+          /* Skjul slet-knapper og lignende inde i fag-kortene */
+          .fag-card button[aria-label*="Slet"],
+          .fag-card button[aria-label*="Fold"],
+          .fag-card .drag-handle
+          { display: none !important; }
+
+          /* Sidebar lærere: behold listen og dens visuelle stil, fjern kun knapper */
+          .laerere-aside button { display: none !important; }
+
+          /* Fasthold layoutet som på desktop: fag til venstre, lærere i sidebar til højre.
+             Override mobile-stacking-rule der ellers kunne kicke ind ved smal print-bredde. */
+          .main-grid {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) 264px !important;
+            gap: 16px !important;
+            align-items: start !important;
+          }
+          .laerere-aside {
+            position: static !important;
+            display: block !important;
+          }
+
+          /* Klassenavn-input er kun "input"-shell — skal stadig se ud som tekst på print */
+          .klasse-titel {
+            border: none !important;
+            background: transparent !important;
+            outline: none !important;
+          }
+
+          /* Page-wrap holder sin look, men må ikke clippes af viewport */
+          .page-wrap {
+            max-width: none !important;
+          }
+
+          /* Forhindre at fag-kort splittes over sider midt i indholdet */
+          .fag-card {
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+          .stat-bar { page-break-inside: avoid; }
+        }
       `}</style>
+
+      {/* MULTI-CLASS: Hamburger som global affordance — fixed top-left i viewport,
+          udenfor page-wrap. Står alene som signal om "her er der noget mere".
+          Kun synlig på desktop; mobil bruger sit eget tab/bottom-sheet system. */}
+      {!isMobile && (
+        <button
+          onClick={() => {
+            // Toggle: åben → luk, luk → åben. Når der lukkes, skal evt. omdøb-state nulstilles.
+            if (menuAaben) {
+              setMenuAaben(false);
+              annullerOmdoeb();
+            } else {
+              setMenuAaben(true);
+            }
+          }}
+          aria-label={menuAaben ? "Luk menu" : `Skift klasse (nuværende: ${klasseNavn}). ${klasser.length} klasse${klasser.length === 1 ? "" : "r"} i alt.`}
+          title={menuAaben ? "Luk menu" : "Skift klasse"}
+          style={{
+            position: "fixed",
+            top: "20px", left: "20px",
+            width: "44px", height: "44px",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: "transparent", border: "none",
+            color: "#1a1a1a", cursor: "pointer",
+            borderRadius: 0, padding: 0,
+            transition: "background 0.12s",
+            // Skal ligge over click-catcher (zIndex 90), så klik på hamburgeren
+            // rammer knappen direkte og ikke bliver fanget af baggrunds-overlayet.
+            zIndex: 95,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "#ece5d4"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+        >
+          <Menu size={24} strokeWidth={1.75} />
+        </button>
+      )}
 
       <div className="page-wrap" style={{ maxWidth: "1280px", margin: "0 auto", padding: "24px 24px 64px" }}>
         {/* Header */}
@@ -1013,26 +1339,26 @@ export default function Fagfordeling() {
             alignItems: "center", gap: "16px",
           }}>
             <input
-              className="klasse-titel"
-              type="text"
-              value={klasseNavn}
-              onChange={(e) => setKlasseNavn(e.target.value)}
-              style={{
-                fontFamily: "'Fraunces', Georgia, serif",
-                fontSize: "44px",
-                fontWeight: 600,
-                letterSpacing: "-0.02em",
-                color: "#1a1a1a",
-                background: "transparent",
-                border: "none",
-                padding: "0",
-                lineHeight: 1,
-                fieldSizing: "content",
-                minWidth: "60px",
-                maxWidth: "100%",
-                flex: "0 1 auto",
-              }}
-            />
+                className="klasse-titel"
+                type="text"
+                value={klasseNavn}
+                onChange={(e) => setKlasseNavn(e.target.value)}
+                style={{
+                  fontFamily: "'Fraunces', Georgia, serif",
+                  fontSize: "44px",
+                  fontWeight: 600,
+                  letterSpacing: "-0.02em",
+                  color: "#1a1a1a",
+                  background: "transparent",
+                  border: "none",
+                  padding: "0",
+                  lineHeight: 1,
+                  fieldSizing: "content",
+                  minWidth: "60px",
+                  maxWidth: "100%",
+                  flex: "0 1 auto",
+                }}
+              />
             <div style={{
               display: "flex", gap: "8px",
               flexShrink: 0,
@@ -1051,20 +1377,103 @@ export default function Fagfordeling() {
               >
                 <Upload size={14} /> <span className="header-btn-label">Importér</span>
               </button>
-              <button
-                onClick={eksporter}
-                className="header-btn header-io-btn"
-                aria-label="Eksportér"
-                title="Eksportér"
-                style={{
-                  display: "flex", alignItems: "center", gap: "6px",
-                  padding: "8px 12px", fontSize: "13px", fontWeight: 500,
-                  background: "transparent", border: "1px solid #1a1a1a",
-                  color: "#1a1a1a", borderRadius: "0", cursor: "pointer",
-                }}
-              >
-                <Download size={14} /> <span className="header-btn-label">Eksportér</span>
-              </button>
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setEksportMenuAaben(prev => !prev)}
+                  className="header-btn header-io-btn"
+                  aria-label="Eksportér"
+                  aria-expanded={eksportMenuAaben}
+                  title="Eksportér"
+                  style={{
+                    display: "flex", alignItems: "center", gap: "6px",
+                    padding: "8px 12px", fontSize: "13px", fontWeight: 500,
+                    background: eksportMenuAaben ? "#1a1a1a" : "transparent",
+                    color: eksportMenuAaben ? "#f5f1ea" : "#1a1a1a",
+                    border: "1px solid #1a1a1a",
+                    borderRadius: "0", cursor: "pointer",
+                    position: "relative", zIndex: 71,
+                  }}
+                >
+                  <Download size={14} /> <span className="header-btn-label">Eksportér</span>
+                  <ChevronDown size={12} style={{
+                    transition: "transform 0.15s",
+                    transform: eksportMenuAaben ? "rotate(180deg)" : "rotate(0deg)",
+                  }} />
+                </button>
+                {eksportMenuAaben && (
+                  <>
+                    {/* Click-catcher der lukker dropdown ved klik udenfor */}
+                    <div
+                      onClick={() => setEksportMenuAaben(false)}
+                      style={{ position: "fixed", inset: 0, zIndex: 69 }}
+                    />
+                    <div
+                      role="menu"
+                      style={{
+                        position: "absolute",
+                        top: "calc(100% + 4px)", right: 0,
+                        minWidth: "220px",
+                        background: "#f5f1ea",
+                        border: "1px solid #1a1a1a",
+                        zIndex: 70,
+                        animation: "panelFadeIn 0.14s ease",
+                      }}
+                    >
+                      <button
+                        onClick={eksportSomPDF}
+                        role="menuitem"
+                        className="eksport-menu-item"
+                        style={{
+                          display: "flex", alignItems: "center", gap: "10px",
+                          width: "100%", padding: "12px 14px",
+                          background: "transparent", border: "none",
+                          textAlign: "left", cursor: "pointer",
+                          fontSize: "13px", color: "#1a1a1a",
+                          transition: "background 0.12s",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "#ece5d4"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <div style={{
+                          fontFamily: "'Fraunces', Georgia, serif",
+                          fontSize: "15px", fontWeight: 500, lineHeight: 1.2,
+                        }}>
+                          Som PDF
+                        </div>
+                        <div style={{ marginLeft: "auto", fontSize: "11px", color: "#9a9387" }}>
+                          print →
+                        </div>
+                      </button>
+                      <div style={{ height: "1px", background: "#e0d9ca" }} />
+                      <button
+                        onClick={eksportSomJSON}
+                        role="menuitem"
+                        className="eksport-menu-item"
+                        style={{
+                          display: "flex", alignItems: "center", gap: "10px",
+                          width: "100%", padding: "12px 14px",
+                          background: "transparent", border: "none",
+                          textAlign: "left", cursor: "pointer",
+                          fontSize: "13px", color: "#1a1a1a",
+                          transition: "background 0.12s",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "#ece5d4"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <div style={{
+                          fontFamily: "'Fraunces', Georgia, serif",
+                          fontSize: "15px", fontWeight: 500, lineHeight: 1.2,
+                        }}>
+                          Som data-fil
+                        </div>
+                        <div style={{ marginLeft: "auto", fontSize: "11px", color: "#9a9387" }}>
+                          .json
+                        </div>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
               <button
                 onClick={nulstilAlt}
                 className="header-btn header-io-btn"
@@ -1431,6 +1840,7 @@ export default function Fagfordeling() {
             <button
               onClick={tilfoejFag}
               className="add-fag-btn"
+              data-no-print="true"
               style={{
                 marginTop: "16px", width: "100%", padding: "14px",
                 fontSize: "14px", fontWeight: 500, color: "#1a1a1a",
@@ -1517,6 +1927,8 @@ export default function Fagfordeling() {
               ) : (
                 <button
                   onClick={() => setTilfoejNavnAaben(true)}
+                  className="add-laerer-btn"
+                  data-no-print="true"
                   style={{
                     width: "100%", padding: "8px 10px",
                     fontSize: "13px", fontWeight: 500, color: "#5a5448",
@@ -1658,6 +2070,178 @@ export default function Fagfordeling() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* MULTI-CLASS: Klasse-menu — minimal, ingen chrome.
+          Backdrop dæmper baggrunden let; panelet selv har samme cremefarve som siden,
+          så det føles som indhold der glider ind, ikke en kasse der lægger sig ovenpå.
+          Ingen borders, shadows eller dividers — kun whitespace og typografi. */}
+      {menuAaben && (
+        <div
+          onClick={() => { setMenuAaben(false); annullerOmdoeb(); }}
+          style={{
+            // Usynlig click-catcher: dækker siden, men ingen wash, ingen blur,
+            // ingen dim. Klik et hvilket som helst sted lukker menuen.
+            position: "fixed", inset: 0,
+            background: "transparent",
+            zIndex: 90,
+          }}
+          onKeyDown={(e) => { if (e.key === "Escape") setMenuAaben(false); }}
+        >
+          <aside
+            onClick={(e) => e.stopPropagation()}
+            className="klasse-menu-aside"
+            style={{
+              position: "fixed", top: 0, left: 0, bottom: 0,
+              width: "220px", maxWidth: "70vw",
+              background: "transparent",
+              // Tynd hairline langs højre kant — anker for menu-zonen uden at være en kasse
+              borderRight: "1px solid #e0d9ca",
+              display: "flex", flexDirection: "column",
+              animation: "panelFadeIn 0.18s ease",
+              zIndex: 91,
+              padding: "76px 20px 28px",
+            }}
+          >
+            {/* Eyebrow — diskret label, ikke en header med ramme */}
+            <div style={{
+              fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase",
+              color: "#9a9387", fontWeight: 500,
+              marginBottom: "18px", paddingLeft: "14px",
+            }}>
+              Klasser
+            </div>
+
+            {/* Klasse-liste */}
+            <div style={{ flex: 1, overflowY: "auto", margin: "0 -24px", padding: "0" }}>
+              {klasser.map((k) => {
+                const erAktiv = k.id === aktivKlasseId;
+                const erUnderOmdoeb = k.id === omdoeberKlasseId;
+                const fagAntal = k.fag.length;
+                return (
+                  <div
+                    key={k.id}
+                    className={`klasse-menu-row${erAktiv ? " aktiv" : ""}`}
+                    style={{
+                      position: "relative",
+                      display: "flex", alignItems: "center",
+                      padding: "10px 24px 10px 38px",
+                      cursor: erUnderOmdoeb ? "default" : "pointer",
+                      gap: "8px",
+                      minHeight: "44px",
+                    }}
+                    onClick={() => { if (!erUnderOmdoeb) skiftAktivKlasse(k.id); }}
+                  >
+                    {erUnderOmdoeb ? (
+                      <>
+                        <input
+                          autoFocus
+                          type="text"
+                          value={omdoebNavn}
+                          onChange={(e) => setOmdoebNavn(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") gemOmdoeb();
+                            if (e.key === "Escape") annullerOmdoeb();
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onBlur={gemOmdoeb}
+                          style={{
+                            flex: 1,
+                            fontFamily: "'Fraunces', Georgia, serif",
+                            fontSize: "16px", fontWeight: 500, color: "#1a1a1a",
+                            background: "transparent",
+                            border: "none",
+                            borderBottom: "1px solid #1a1a1a",
+                            padding: "2px 0",
+                            outline: "none",
+                            minWidth: 0,
+                          }}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "baseline", gap: "10px" }}>
+                          <span className="klasse-menu-navn" style={{
+                            fontFamily: "'Fraunces', Georgia, serif",
+                            fontSize: "16px", fontWeight: 500,
+                            color: "#5a5448",
+                            transition: "color 0.12s",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            {k.navn}
+                          </span>
+                          <span style={{
+                            fontSize: "12px", color: "#9a9387",
+                            fontVariantNumeric: "tabular-nums",
+                            flexShrink: 0,
+                          }}>
+                            {fagAntal === 0 ? "—" : fagAntal}
+                          </span>
+                        </div>
+                        <div className="klasse-menu-actions" style={{
+                          display: "flex", gap: "2px",
+                          opacity: 0,
+                          transition: "opacity 0.15s",
+                          flexShrink: 0,
+                        }}>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); startOmdoeb(k); }}
+                            aria-label={`Omdøb ${k.navn}`}
+                            title="Omdøb"
+                            style={{
+                              background: "transparent", border: "none",
+                              color: "#9a9387",
+                              cursor: "pointer", padding: "4px",
+                              display: "flex",
+                            }}
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); sletKlasse(k); }}
+                            aria-label={`Slet ${k.navn}`}
+                            title={klasser.length <= 1 ? "Mindst én klasse skal eksistere" : "Slet klasse"}
+                            disabled={klasser.length <= 1}
+                            style={{
+                              background: "transparent", border: "none",
+                              color: klasser.length <= 1 ? "#cdc5b8" : "#9a9387",
+                              cursor: klasser.length <= 1 ? "not-allowed" : "pointer",
+                              padding: "4px",
+                              display: "flex",
+                            }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Tilføj klasse — som tekst-link, ikke kasse */}
+            <button
+              onClick={tilfoejKlasse}
+              className="klasse-menu-add"
+              style={{
+                marginTop: "20px",
+                display: "flex", alignItems: "center",
+                gap: "8px",
+                padding: "10px 14px 10px 38px",
+                margin: "20px -24px 0",
+                fontFamily: "'Fraunces', Georgia, serif",
+                fontSize: "15px", fontWeight: 500,
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              <Plus size={15} strokeWidth={1.75} /> Tilføj klasse
+            </button>
+          </aside>
         </div>
       )}
 
