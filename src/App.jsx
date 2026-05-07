@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Plus, Trash2, Download, Upload, X, Users, BookOpen, AlertCircle, CheckCircle2, Circle, ChevronDown, RotateCcw, Menu, Pencil, Undo2 } from "lucide-react";
-import { DndContext, DragOverlay, closestCorners, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, MeasuringStrategy } from "@dnd-kit/core";
+import { DndContext, DragOverlay, closestCorners, pointerWithin, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, MeasuringStrategy } from "@dnd-kit/core";
 import { SortableContext, useSortable, rectSortingStrategy, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
@@ -1366,12 +1366,31 @@ export default function Fagfordeling() {
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
   );
 
-  // closestCorners alene — den finder altid den nærmeste retning, så de
-  // andre kort begynder at glide LIDT FØR musen rammer destinationen.
-  // Det giver en blød "forhandlet" overgang i stedet for et brat snap når
-  // tærsklen krydses. MeasuringStrategy.Always (på DndContext) sikrer at
-  // målingerne er friske, så der ikke kommer flip-back-glitch.
-  const collisionDetectionStrategy = closestCorners;
+  // Composed collision detection: pointerWithin først (kun targets musen
+  // faktisk er INDE i), fallback til closestCorners KUN for fag-drag (så
+  // fag-kort kan reorderes selvom musen er i mellemrummet mellem dem).
+  // Fanger to bugs: (1) drop udenfor fag-kort triggrede tidligere alligevel
+  // et drop på det nærmeste, fordi closestCorners aldrig returnerer tom.
+  // (2) lærer-kort kan ikke længere "snape" til distant cards.
+  const collisionDetectionStrategy = React.useCallback((args) => {
+    const pointerCollisions = pointerWithin(args);
+    if (pointerCollisions.length > 0) return pointerCollisions;
+    const activeId = args.active?.id;
+    const isFagDrag = fag.some((f) => f.id === activeId);
+    if (isFagDrag) return closestCorners(args);
+    return [];
+  }, [fag]);
+
+  // Samme strategi for Min oversigt: drop kun valid hvis musen er INDE i
+  // et fag-kort eller en klasse-row. Fag-reorder bruger closestCorners.
+  const collisionMinStrategy = React.useCallback((args) => {
+    const pointerCollisions = pointerWithin(args);
+    if (pointerCollisions.length > 0) return pointerCollisions;
+    const activeId = args.active?.id;
+    const isFagDrag = mig.fag.some((f) => f.id === activeId);
+    if (isFagDrag) return closestCorners(args);
+    return [];
+  }, [mig.fag]);
 
   // Aktiv drag-id til DragOverlay (sørger for at trukket lærer altid er øverst)
   const [activeDragId, setActiveDragId] = useState(null);
@@ -1418,26 +1437,22 @@ export default function Fagfordeling() {
     const activeIsFag = fag.some((f) => f.id === active.id);
     if (activeIsFag) return;
 
-    // Skip sidebar-drag — den håndteres som "tilføj lærer til fag" i handleDragEnd
+    // Skip sidebar-drag — den håndteres som "tilføj lærer til fag" i handleDragEnd.
+    // (Ghost-insert med samme id ville kollidere med sidebarens useDraggable.)
     const isSidebarDrag = typeof active.id === "string" && active.id.startsWith("sidebar:");
     if (isSidebarDrag) return;
 
     const overIsFag = fag.some((f) => f.id === over.id);
-
-    // Find current source (kan være ændret af tidligere drag-over events)
     const currentSource = fag.find((f) => f.laerere.some((l) => l.id === active.id));
     if (!currentSource) return;
 
-    // Find target fag
     const target = overIsFag
       ? fag.find((f) => f.id === over.id)
       : fag.find((f) => f.laerere.some((l) => l.id === over.id));
     if (!target) return;
 
-    // Samme fag — lad SortableContext håndtere within-fag shuffle
     if (target.id === currentSource.id) return;
 
-    // Cross-fag flytning
     const movingLaerer = currentSource.laerere.find((l) => l.id === active.id);
     let destIndex = overIsFag
       ? target.laerere.length
@@ -1449,7 +1464,6 @@ export default function Fagfordeling() {
         return { ...f, laerere: f.laerere.filter((l) => l.id !== active.id) };
       }
       if (f.id === target.id) {
-        // Forhindrer dobbelt-indsættelse ved hurtige drag-over events
         if (f.laerere.some((l) => l.id === active.id)) return f;
         const newLaerere = [...f.laerere];
         newLaerere.splice(destIndex, 0, movingLaerer);
@@ -1486,7 +1500,7 @@ export default function Fagfordeling() {
         if (f.id !== targetFagId) return f;
         const norm = normalizeNavn(sidebarNavn).toLowerCase();
         if (f.laerere.some((l) => normalizeNavn(l.navn).toLowerCase() === norm)) {
-          return f; // allerede på faget — no-op
+          return f;
         }
         const fagLekt = parseInt(f.lektioner) || 0;
         return {
@@ -1494,7 +1508,6 @@ export default function Fagfordeling() {
           laerere: [...f.laerere, { id: nytId(), navn: sidebarNavn, lektioner: fagLekt }],
         };
       }));
-      // Fjern fra pendingNavne — læreren er nu på et rigtigt fag
       setPendingNavne((prev) => prev.filter((n) => n !== sidebarNavn));
       return;
     }
@@ -2534,7 +2547,7 @@ export default function Fagfordeling() {
 
             <DndContext
               sensors={sensors}
-              collisionDetection={closestCorners}
+              collisionDetection={collisionMinStrategy}
               measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
               onDragStart={handleMinDragStart}
               onDragEnd={handleMinDragEnd}
