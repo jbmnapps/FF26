@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, Trash2, Download, Upload, X, Users, BookOpen, AlertCircle, CheckCircle2, Circle, ChevronDown, RotateCcw, Menu, Pencil, Undo2 } from "lucide-react";
+import { Plus, Trash2, Download, Upload, X, Users, BookOpen, AlertCircle, CheckCircle2, Circle, ChevronDown, RotateCcw, Menu, Pencil, Undo2, HelpCircle } from "lucide-react";
 import { DndContext, DragOverlay, closestCorners, pointerWithin, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, MeasuringStrategy } from "@dnd-kit/core";
 import { SortableContext, useSortable, rectSortingStrategy, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -185,11 +185,11 @@ const FAG_FORKORTELSER = {
   "biologi": "Bio",
   "fysik": "Fys",
   "kemi": "Kem",
-  "fysik/kemi": "F/K",
-  "f/k": "F/K",
-  "natur/teknologi": "N/T",
-  "natur og teknologi": "N/T",
-  "n/t": "N/T",
+  "fysik/kemi": "Fys/Kem",
+  "f/k": "Fys/Kem",
+  "natur/teknologi": "Nat/Tek",
+  "natur og teknologi": "Nat/Tek",
+  "n/t": "Nat/Tek",
   "samfundsfag": "Sam",
   "religion": "Rel",
   "kristendom": "Kri",
@@ -453,6 +453,10 @@ export default function Fagfordeling() {
   const [hamburgerNyLaererNavn, setHamburgerNyLaererNavn] = useState("");
   const [omdoeberLaererId, setOmdoeberLaererId] = useState(null);
   const [omdoebLaererNavn, setOmdoebLaererNavn] = useState("");
+  // Collapse-state for hamburger-sektioner — klik på eyebrow toggler
+  const [klasserKollapset, setKlasserKollapset] = useState(false);
+  const [laerereKollapset, setLaerereKollapset] = useState(false);
+  const [visHowTo, setVisHowTo] = useState(false);
   // Vises som toast nederst hvis localStorage.setItem fejler (typisk quota fyldt
   // eller Safari Privat tilstand). Rydder selv efter 6 sekunder.
   const [gemFejlet, setGemFejlet] = useState(false);
@@ -504,12 +508,9 @@ export default function Fagfordeling() {
           const klasseEn = { id, navn: data.klasseNavn || "Min klasse", fag: migreredeFag };
           setKlasser([klasseEn]);
           setAktivKlasseId(id);
-        } else {
-          // Korrupt eller tom data — opret default klasse
-          const id = nytId();
-          setKlasser([{ id, navn: "Min klasse", fag: [] }]);
-          setAktivKlasseId(id);
         }
+        // Hvis hverken klasser eller mig/laerere findes, lad listerne være tomme —
+        // empty-state-screen vil vise klasse/lærer-valget.
         // MULTI-LAERER: load laerere + aktivLaererId. Migration: hvis kun gammel
         // `mig` findes, konvertér den til laerere[0]. Hvis intet, start med tom
         // lærer-liste — brugeren tilføjer selv via "+ Tilføj lærer".
@@ -548,17 +549,11 @@ export default function Fagfordeling() {
         } else if (data.visning === "min") {
           setVisning("laerer");
         }
-      } else {
-        // Første gang — opret default klasse
-        const id = nytId();
-        setKlasser([{ id, navn: "Min klasse", fag: [] }]);
-        setAktivKlasseId(id);
       }
+      // Første gang (eller korrupt data) — listerne forbliver tomme.
+      // Empty-state-screen viser klasse/lærer-valget.
     } catch (e) {
-      // Korrupt data — opret default klasse
-      const id = nytId();
-      setKlasser([{ id, navn: "Min klasse", fag: [] }]);
-      setAktivKlasseId(id);
+      // Korrupt JSON — start tomt
     }
     setLoaded(true);
   }, []);
@@ -965,13 +960,66 @@ export default function Fagfordeling() {
   const importerData = (jsonString) => {
     try {
       const data = JSON.parse(jsonString);
-      // MULTI-CLASS: Accepter både ny shape (klasser-array) og gammel (én klasse).
-      if (Array.isArray(data.klasser) && data.klasser.length > 0) {
+      // Schema-validering: tjek at data har den forventede struktur før vi
+      // overskriver app-state. Forhindrer at en korrupt fil crasher appen.
+      if (!data || typeof data !== "object" || Array.isArray(data)) {
+        setImportFejl("Filen er ikke en gyldig fagfordeling (forventer et JSON-objekt).");
+        return;
+      }
+      const harKlasserShape = Array.isArray(data.klasser) && data.klasser.length > 0;
+      const harGammelShape = Array.isArray(data.fag);
+      const harLaerereShape = Array.isArray(data.laerere);
+      const harGammelMig = data.mig && typeof data.mig === "object" && !Array.isArray(data.mig);
+      if (!harKlasserShape && !harGammelShape && !harLaerereShape && !harGammelMig) {
+        setImportFejl("Filen ser ikke ud til at være en fagfordeling.");
+        return;
+      }
+      // Valider hver klasse + dens fag
+      if (harKlasserShape) {
+        for (const k of data.klasser) {
+          if (!k || typeof k !== "object" || typeof k.navn !== "string") {
+            setImportFejl("En af klasserne i filen mangler navn eller har forkert form.");
+            return;
+          }
+          if (k.fag !== undefined && !Array.isArray(k.fag)) {
+            setImportFejl(`Klasse "${k.navn}" har en ugyldig fag-liste.`);
+            return;
+          }
+          for (const f of (k.fag || [])) {
+            if (!f || typeof f !== "object" || typeof f.navn !== "string") {
+              setImportFejl(`Et fag i klasse "${k.navn}" har forkert form.`);
+              return;
+            }
+            if (f.laerere !== undefined && !Array.isArray(f.laerere)) {
+              setImportFejl(`Faget "${f.navn}" i "${k.navn}" har en ugyldig lærer-liste.`);
+              return;
+            }
+          }
+        }
+      }
+      // Valider lærere
+      if (harLaerereShape) {
+        for (const l of data.laerere) {
+          if (!l || typeof l !== "object" || typeof l.navn !== "string") {
+            setImportFejl("En af lærerne i filen mangler navn eller har forkert form.");
+            return;
+          }
+          if (l.fag !== undefined && !Array.isArray(l.fag)) {
+            setImportFejl(`Lærer "${l.navn}" har en ugyldig fag-liste.`);
+            return;
+          }
+        }
+      }
+      // Valideret — anvend data
+      if (harKlasserShape) {
         const migreredeKlasser = data.klasser.map(k => ({
           ...k,
+          id: k.id ?? nytId(),
           fag: (k.fag || []).map(f => ({
             ...f,
+            id: f.id ?? nytId(),
             forventedeLaerere: f.forventedeLaerere ?? 2,
+            laerere: Array.isArray(f.laerere) ? f.laerere : [],
           })),
         }));
         setKlasser(migreredeKlasser);
@@ -979,17 +1027,16 @@ export default function Fagfordeling() {
           ? data.aktivKlasseId
           : migreredeKlasser[0].id;
         setAktivKlasseId(aktivId);
-      } else if (data.fag) {
+      } else if (harGammelShape) {
         const id = nytId();
         const migreredeFag = data.fag.map(f => ({
           ...f,
+          id: f.id ?? nytId(),
           forventedeLaerere: f.forventedeLaerere ?? 2,
+          laerere: Array.isArray(f.laerere) ? f.laerere : [],
         }));
         setKlasser([{ id, navn: data.klasseNavn || "Min klasse", fag: migreredeFag }]);
         setAktivKlasseId(id);
-      } else {
-        setImportFejl("Filen ser ikke ud til at være en fagfordeling.");
-        return;
       }
       // MULTI-LAERER: importer laerere/aktivLaererId + visning hvis de findes
       if (Array.isArray(data.laerere)) {
@@ -1072,12 +1119,32 @@ export default function Fagfordeling() {
     });
   };
 
+  // Empty-state-valg ved første åbning: bruger vælger om de vil starte med
+  // klasse-overblik eller lærer-overblik. Begge muligheder kan kombineres
+  // bagefter, men start-pointen sætter konteksten.
+  const startMedKlasse = () => {
+    const id = nytId();
+    setKlasser([{ id, navn: "Min klasse", fag: [] }]);
+    setAktivKlasseId(id);
+    setVisning("klasse");
+  };
+
+  const startMedLaerer = () => {
+    const id = nytId();
+    setLaerere([{
+      id, navn: "Lærer 1", maalLektioner: null,
+      fag: [{ id: nytId(), navn: "", klasse: "", lektioner: 1 }],
+    }]);
+    setAktivLaererId(id);
+    setVisning("laerer");
+  };
+
   // MULTI-CLASS: operationer på klasse-arrayet. Tilfoej accepterer nu et navn
   // fra hamburger-input-flowet (dashed-style); falder tilbage til "Klasse N"
   // hvis tomt så brugeren ikke ender med en navnløs klasse.
   const tilfoejKlasse = (raaNavn) => {
     const trimmet = (raaNavn || "").trim();
-    const navn = trimmet || `Klasse ${klasser.length + 1}`;
+    const navn = trimmet ? normaliserKlasse(trimmet) : `Klasse ${klasser.length + 1}`;
     const id = nytId();
     const nyKlasse = { id, navn, fag: [] };
     setKlasser(prev => [...prev, nyKlasse]);
@@ -1090,23 +1157,19 @@ export default function Fagfordeling() {
     setNytLaererNavn("");
     setHamburgerNyKlasseAaben(false);
     setHamburgerNyKlasseNavn("");
-    setMenuAaben(false);
   };
 
   const skiftAktivKlasse = (id) => {
-    // MIN-OVERSIGT: skift også visning tilbage til klasse hvis vi er i min oversigt
+    // Skift også visning tilbage til klasse hvis vi er i lærer-visning.
+    // Menuen forbliver åben — brugeren lukker den selv ved klik udenfor / Escape.
     setVisning("klasse");
-    if (id === aktivKlasseId && visning === "klasse") {
-      setMenuAaben(false);
-      return;
-    }
+    if (id === aktivKlasseId && visning === "klasse") return;
     setAktivKlasseId(id);
     setUdfoldede(new Set());
     setValgtKlassetrin(null);
     setPendingNavne([]);
     setTilfoejNavnAaben(false);
     setNytLaererNavn("");
-    setMenuAaben(false);
   };
 
   const startOmdoeb = (k) => {
@@ -1115,7 +1178,7 @@ export default function Fagfordeling() {
   };
 
   const gemOmdoeb = () => {
-    const navn = omdoebNavn.trim();
+    const navn = normaliserKlasse(omdoebNavn);
     if (!navn) {
       setOmdoeberKlasseId(null);
       return;
@@ -1151,15 +1214,14 @@ export default function Fagfordeling() {
     setHamburgerNyLaererAaben(false);
     setHamburgerNyLaererNavn("");
     setLaererMaalInput("");
-    setMenuAaben(false);
   };
 
   const skiftAktivLaerer = (id) => {
+    // Menuen forbliver åben — brugeren lukker den selv ved klik udenfor / Escape.
     setAktivLaererId(id);
     setVisning("laerer");
     setRedigerMigNavn(false);
     setRedigerMigMaal(false);
-    setMenuAaben(false);
   };
 
   const omdoebLaerer = (id, nytNavn) => {
@@ -1609,16 +1671,15 @@ export default function Fagfordeling() {
         }
         @keyframes backdropFade { from { opacity: 0; } to { opacity: 1; } }
         .klasse-menu-aside { will-change: transform, opacity; backface-visibility: hidden; }
+        .klasse-menu-row { transition: background 0.12s ease; }
+        .klasse-menu-row:hover { background: rgba(0,0,0,0.03); }
         .klasse-menu-row:hover .klasse-menu-actions { opacity: 1 !important; }
         .klasse-menu-row:hover .klasse-menu-navn { color: #1a1a1a !important; }
-        /* Aktiv klasse: en tynd lodret streg ved venstre kant + fed vægt. Ingen kasse. */
+        /* Aktiv klasse/lærer: bold vægt + sort tekst. Ingen bar, ingen kasse —
+           lad typografien bære signalet. */
         .klasse-menu-row.aktiv .klasse-menu-navn { font-weight: 600 !important; color: #1a1a1a !important; }
-        .klasse-menu-row.aktiv::before {
-          content: ""; position: absolute; left: 0; top: 12px; bottom: 12px;
-          width: 2px; background: #1a1a1a;
-        }
-        .klasse-menu-add { color: #7a7367; transition: color 0.12s; }
-        .klasse-menu-add:hover { color: #1a1a1a !important; }
+        .klasse-menu-add { color: #cdc5b8; transition: background 0.12s, color 0.12s; }
+        .klasse-menu-add:hover { background: rgba(0,0,0,0.03); color: #1a1a1a !important; }
         .fag-card { animation: fadeIn 0.25s ease; }
         .mobile-fag-tile:active { transform: scale(0.97); transition: transform 0.1s; }
         .fag-card-fagnavn { field-sizing: content; min-width: 60px; max-width: 100%; }
@@ -1754,6 +1815,68 @@ export default function Fagfordeling() {
         }
       `}</style>
 
+      {/* Empty-state choice screen — vises kun ved første åbning når der hverken
+          er klasser eller lærere. Bruger vælger startpunkt; alt kan kombineres
+          bagefter. Overlay dækker hele skærmen så underliggende UI ikke flimrer. */}
+      {loaded && klasser.length === 0 && laerere.length === 0 && (
+        <div style={{
+          position: "fixed", inset: 0, background: "#f5f1ea",
+          zIndex: 200,
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          padding: "40px 20px",
+        }}>
+          <div style={{ maxWidth: "560px", width: "100%", textAlign: "center" }}>
+            <h1 style={{
+              fontFamily: "'Fraunces', Georgia, serif",
+              fontSize: "36px", fontWeight: 600,
+              letterSpacing: "-0.02em",
+              color: "#1a1a1a",
+              margin: "0 0 12px",
+            }}>
+              Skab overblik for klasse eller lærer?
+            </h1>
+            <p style={{
+              fontSize: "14px", color: "#7a7367",
+              lineHeight: 1.5,
+              margin: "0 0 36px",
+            }}>
+              Vælg et startpunkt — du kan rette og tilføje mere bagefter.
+            </p>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
+              <button
+                onClick={startMedKlasse}
+                style={{
+                  padding: "16px 32px",
+                  fontFamily: "'Fraunces', Georgia, serif",
+                  fontSize: "18px", fontWeight: 500,
+                  background: "#1a1a1a", color: "#f5f1ea",
+                  border: "1px solid #1a1a1a",
+                  cursor: "pointer",
+                  minWidth: "160px",
+                }}
+              >
+                Klasse
+              </button>
+              <button
+                onClick={startMedLaerer}
+                style={{
+                  padding: "16px 32px",
+                  fontFamily: "'Fraunces', Georgia, serif",
+                  fontSize: "18px", fontWeight: 500,
+                  background: "transparent", color: "#1a1a1a",
+                  border: "1px solid #1a1a1a",
+                  cursor: "pointer",
+                  minWidth: "160px",
+                }}
+              >
+                Lærer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MULTI-CLASS: Hamburger som global affordance — fixed top-left i viewport,
           udenfor page-wrap. Står alene som signal om "her er der noget mere".
           Kun synlig på desktop; mobil bruger sit eget tab/bottom-sheet system. */}
@@ -1804,6 +1927,11 @@ export default function Fagfordeling() {
                 type="text"
                 value={klasseNavn}
                 onChange={(e) => setKlasseNavn(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") e.target.blur(); }}
+                onBlur={() => {
+                  const normaliseret = normaliserKlasse(klasseNavn);
+                  if (normaliseret && normaliseret !== klasseNavn) setKlasseNavn(normaliseret);
+                }}
                 style={{
                   fontFamily: "'Fraunces', Georgia, serif",
                   fontSize: "44px",
@@ -2044,6 +2172,20 @@ export default function Fagfordeling() {
               >
                 <RotateCcw size={14} />
               </button>
+              <button
+                onClick={() => setVisHowTo(true)}
+                className="header-btn header-io-btn"
+                aria-label="Sådan bruger du appen"
+                title="Sådan bruger du appen"
+                style={{
+                  display: "flex", alignItems: "center", gap: "6px",
+                  padding: "8px 10px", fontSize: "13px",
+                  background: "transparent", border: "1px solid #cdc5b8",
+                  color: "#7a7367", borderRadius: "0", cursor: "pointer",
+                }}
+              >
+                <HelpCircle size={14} />
+              </button>
             </div>
           </div>
         </header>
@@ -2235,10 +2377,9 @@ export default function Fagfordeling() {
                         fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
                         marginBottom: "6px",
                       }}>
-                        Start fra fagrække
+                        Vælg klassetrin
                       </div>
                       <div style={{ fontSize: "13px", color: "#7a7367", lineHeight: 1.5 }}>
-                        Vælg klassetrin for at indlæse vejledende UVM-tal.<br/>
                         Tilføj selv tysk/fransk og evt. valgfag bagefter.
                       </div>
                     </>
@@ -2493,7 +2634,7 @@ export default function Fagfordeling() {
                     display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
                   }}
                 >
-                  <Plus size={14} /> Tilføj lærer
+                  <Plus size={12} /> Tilføj lærer
                 </button>
               )}
             </div>
@@ -2679,7 +2820,7 @@ export default function Fagfordeling() {
                           display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
                         }}
                       >
-                        <Plus size={14} /> Tilføj klasse
+                        <Plus size={12} /> Tilføj klasse
                       </button>
                     )}
                   </div>
@@ -2838,29 +2979,69 @@ export default function Fagfordeling() {
             className="klasse-menu-aside"
             style={{
               position: "fixed", top: 0, left: 0, bottom: 0,
-              width: "220px", maxWidth: "70vw",
+              width: "240px", maxWidth: "70vw",
               background: "transparent",
-              // Tynd hairline langs højre kant — anker for menu-zonen uden at være en kasse
               borderRight: "1px solid #e0d9ca",
               display: "flex", flexDirection: "column",
               animation: "panelFadeIn 0.18s ease",
               zIndex: 91,
-              padding: "76px 20px 28px",
-              overflowY: "auto",
+              padding: "80px 0 32px",
             }}
           >
-            {/* Eyebrow — diskret label, ikke en header med ramme */}
+            {/* KLASSER-sektion — flex: 1 når foldet ud, flex: none når foldet ind */}
             <div style={{
-              fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase",
-              color: "#7a7367", fontWeight: 500,
-              marginBottom: "18px", paddingLeft: "14px",
+              flex: klasserKollapset ? "none" : 1,
+              display: "flex", flexDirection: "column", minHeight: 0,
             }}>
-              Klasser
-            </div>
+            {/* Eyebrow — klik for at folde sektionen ind/ud */}
+            <button
+              onClick={() => setKlasserKollapset((v) => !v)}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase",
+                color: "#1a1a1a", fontWeight: 700, fontFamily: "inherit",
+                padding: "4px 24px",
+                marginBottom: "8px",
+                width: "100%",
+                background: "transparent", border: "none",
+                cursor: "pointer", textAlign: "left",
+              }}
+              aria-expanded={!klasserKollapset}
+              aria-label={klasserKollapset ? "Vis klasser" : "Skjul klasser"}
+            >
+              <span>Klasser</span>
+              <ChevronDown
+                size={11}
+                style={{
+                  transform: klasserKollapset ? "rotate(-90deg)" : "rotate(0deg)",
+                  transition: "transform 0.15s ease",
+                  flexShrink: 0,
+                }}
+              />
+            </button>
 
-            {/* Klasse-liste */}
-            <div style={{ margin: "0 -24px", padding: "0" }}>
-              {klasser.map((k) => {
+            {/* Klasse-liste — skjules ved kollaps, scroller internt ellers */}
+            <div style={{
+              flex: 1, overflowY: "auto", minHeight: 0,
+              display: klasserKollapset ? "none" : "block",
+            }}>
+              {[...klasser].sort((a, b) => {
+                // Sortér: ciffer-præfix først (lavest tal øverst), derefter
+                // bogstavet. Klasser uden "C.B"-format ryger sidst alfabetisk.
+                const ka = (a.navn || "").trim().match(/^(\d+)\.?([a-zæøåA-ZÆØÅ])?/);
+                const kb = (b.navn || "").trim().match(/^(\d+)\.?([a-zæøåA-ZÆØÅ])?/);
+                if (ka && !kb) return -1;
+                if (!ka && kb) return 1;
+                if (ka && kb) {
+                  const na = parseInt(ka[1], 10);
+                  const nb = parseInt(kb[1], 10);
+                  if (na !== nb) return na - nb;
+                  const la = (ka[2] || "").toUpperCase();
+                  const lb = (kb[2] || "").toUpperCase();
+                  if (la !== lb) return la.localeCompare(lb, "da");
+                }
+                return (a.navn || "").localeCompare(b.navn || "", "da");
+              }).map((k) => {
                 const erAktiv = k.id === aktivKlasseId;
                 const erUnderOmdoeb = k.id === omdoeberKlasseId;
                 const fagAntal = k.fag.length;
@@ -2869,63 +3050,50 @@ export default function Fagfordeling() {
                     key={k.id}
                     className={`klasse-menu-row${erAktiv ? " aktiv" : ""}`}
                     style={{
-                      position: "relative",
                       display: "flex", alignItems: "center",
-                      padding: "10px 24px 10px 38px",
+                      padding: "8px 24px",
                       cursor: erUnderOmdoeb ? "default" : "pointer",
-                      gap: "8px",
-                      minHeight: "44px",
+                      gap: "12px",
+                      minHeight: "36px",
                     }}
                     onClick={() => { if (!erUnderOmdoeb) skiftAktivKlasse(k.id); }}
                   >
                     {erUnderOmdoeb ? (
-                      <>
-                        <input
-                          autoFocus
-                          type="text"
-                          value={omdoebNavn}
-                          onChange={(e) => setOmdoebNavn(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") gemOmdoeb();
-                            if (e.key === "Escape") annullerOmdoeb();
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          onBlur={gemOmdoeb}
-                          style={{
-                            flex: 1,
-                            fontFamily: "'Fraunces', Georgia, serif",
-                            fontSize: "16px", fontWeight: 500, color: "#1a1a1a",
-                            background: "transparent",
-                            border: "none",
-                            borderBottom: "1px solid #1a1a1a",
-                            padding: "2px 0",
-                            outline: "none",
-                            minWidth: 0,
-                          }}
-                        />
-                      </>
+                      <input
+                        autoFocus
+                        type="text"
+                        value={omdoebNavn}
+                        onChange={(e) => setOmdoebNavn(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") gemOmdoeb();
+                          if (e.key === "Escape") annullerOmdoeb();
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={gemOmdoeb}
+                        style={{
+                          flex: 1,
+                          fontSize: "13px", fontWeight: 600, color: "#1a1a1a",
+                          background: "transparent",
+                          border: "none",
+                          borderBottom: "1px solid #1a1a1a",
+                          padding: "2px 0",
+                          outline: "none",
+                          minWidth: 0,
+                        }}
+                      />
                     ) : (
                       <>
-                        <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "baseline", gap: "10px" }}>
-                          <span className="klasse-menu-navn" style={{
-                            fontFamily: "'Fraunces', Georgia, serif",
-                            fontSize: "16px", fontWeight: 500,
-                            color: "#7a7367",
-                            transition: "color 0.12s",
-                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          }}>
-                            {k.navn}
-                          </span>
-                          <span style={{
-                            fontSize: "12px", color: "#7a7367",
-                            fontVariantNumeric: "tabular-nums",
-                            flexShrink: 0,
-                          }}>
-                            {fagAntal === 0 ? "—" : fagAntal}
-                          </span>
-                        </div>
+                        <span className="klasse-menu-navn" style={{
+                          flex: 1, minWidth: 0,
+                          fontSize: "13px", fontWeight: 600,
+                          color: "#7a7367",
+                          transition: "color 0.12s",
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>
+                          {k.navn}
+                        </span>
                         <div className="klasse-menu-actions" style={{
-                          display: "flex", gap: "2px",
+                          display: "flex", gap: "4px",
                           opacity: 0,
                           transition: "opacity 0.15s",
                           flexShrink: 0,
@@ -2937,11 +3105,11 @@ export default function Fagfordeling() {
                             style={{
                               background: "transparent", border: "none",
                               color: "#7a7367",
-                              cursor: "pointer", padding: "4px",
+                              cursor: "pointer", padding: "2px",
                               display: "flex",
                             }}
                           >
-                            <Pencil size={13} />
+                            <Pencil size={12} />
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); sletKlasse(k); }}
@@ -2952,11 +3120,11 @@ export default function Fagfordeling() {
                               background: "transparent", border: "none",
                               color: klasser.length <= 1 ? "#cdc5b8" : "#7a7367",
                               cursor: klasser.length <= 1 ? "not-allowed" : "pointer",
-                              padding: "4px",
+                              padding: "2px",
                               display: "flex",
                             }}
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={12} />
                           </button>
                         </div>
                       </>
@@ -2964,92 +3132,108 @@ export default function Fagfordeling() {
                   </div>
                 );
               })}
-            </div>
-
-            {/* MULTI-LAERER: "+ Tilføj klasse" — row-style så det lever indeni
-                listen som en ekstra "række". Input ved klik bruger samme
-                bottom-border-line som omdøb-flowet. */}
-            <div style={{ margin: "0 -24px" }}>
-              {hamburgerNyKlasseAaben ? (
-                <div style={{
-                  position: "relative",
-                  display: "flex", alignItems: "center",
-                  padding: "10px 24px 10px 38px",
-                  gap: "8px",
-                  minHeight: "44px",
-                }}>
-                  <input
-                    autoFocus
-                    type="text"
-                    value={hamburgerNyKlasseNavn}
-                    onChange={(e) => setHamburgerNyKlasseNavn(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        tilfoejKlasse(hamburgerNyKlasseNavn);
-                      } else if (e.key === "Escape") {
-                        setHamburgerNyKlasseAaben(false);
-                        setHamburgerNyKlasseNavn("");
-                      }
-                    }}
-                    onBlur={() => {
-                      if (hamburgerNyKlasseNavn.trim()) {
-                        tilfoejKlasse(hamburgerNyKlasseNavn);
-                      } else {
-                        setHamburgerNyKlasseAaben(false);
-                      }
-                    }}
-                    style={{
-                      flex: 1,
-                      fontFamily: "'Fraunces', Georgia, serif",
-                      fontSize: "16px", fontWeight: 500, color: "#1a1a1a",
-                      background: "transparent",
-                      border: "none",
-                      borderBottom: "1px solid #1a1a1a",
-                      padding: "2px 0",
-                      outline: "none",
-                      minWidth: 0,
-                    }}
-                  />
-                </div>
-              ) : (
-                <button
-                  onClick={() => { setHamburgerNyKlasseAaben(true); setHamburgerNyKlasseNavn(""); }}
-                  className="klasse-menu-add"
+            {/* "+ Tilføj klasse" — sidder lige under sidste entry, scroller
+                med listen. Input ved klik bruger samme bottom-border-line. */}
+            {hamburgerNyKlasseAaben ? (
+              <div style={{
+                display: "flex", alignItems: "center",
+                padding: "8px 24px",
+                gap: "12px",
+                minHeight: "36px",
+              }}>
+                <input
+                  autoFocus
+                  type="text"
+                  value={hamburgerNyKlasseNavn}
+                  onChange={(e) => setHamburgerNyKlasseNavn(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      tilfoejKlasse(hamburgerNyKlasseNavn);
+                    } else if (e.key === "Escape") {
+                      setHamburgerNyKlasseAaben(false);
+                      setHamburgerNyKlasseNavn("");
+                    }
+                  }}
+                  onBlur={() => {
+                    if (hamburgerNyKlasseNavn.trim()) {
+                      tilfoejKlasse(hamburgerNyKlasseNavn);
+                    } else {
+                      setHamburgerNyKlasseAaben(false);
+                    }
+                  }}
                   style={{
-                    display: "flex", alignItems: "center",
-                    gap: "8px",
-                    padding: "10px 24px 10px 38px",
-                    minHeight: "44px",
-                    width: "100%",
-                    fontFamily: "'Fraunces', Georgia, serif",
-                    fontSize: "15px", fontWeight: 500,
-                    color: "#7a7367",
+                    flex: 1,
+                    fontSize: "13px", fontWeight: 600, color: "#1a1a1a",
                     background: "transparent",
                     border: "none",
-                    cursor: "pointer",
-                    textAlign: "left",
+                    borderBottom: "1px solid #1a1a1a",
+                    padding: "2px 0",
+                    outline: "none",
+                    minWidth: 0,
                   }}
-                >
-                  <Plus size={15} strokeWidth={1.75} /> Tilføj klasse
-                </button>
-              )}
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => { setHamburgerNyKlasseAaben(true); setHamburgerNyKlasseNavn(""); }}
+                className="klasse-menu-add"
+                style={{
+                  display: "flex", alignItems: "center",
+                  gap: "8px",
+                  padding: "6px 24px",
+                  minHeight: "30px",
+                  marginTop: "4px",
+                  width: "100%",
+                  fontSize: "12px", fontWeight: 500,
+                  color: "#cdc5b8",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <Plus size={12} /> Tilføj klasse
+              </button>
+            )}
+            </div>
             </div>
 
-            {/* MULTI-LAERER: separator + LÆRERE-sektion */}
+            {/* LÆRERE-sektion — flex: 1 når foldet ud, flex: none når foldet ind */}
             <div style={{
-              height: "1px", background: "#e0d9ca",
-              margin: "20px -24px 16px",
-            }} />
-            <div style={{
-              fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase",
-              color: "#7a7367", fontWeight: 500,
-              marginBottom: "10px", paddingLeft: "14px",
+              flex: laerereKollapset ? "none" : 1,
+              display: "flex", flexDirection: "column", minHeight: 0, marginTop: "32px",
             }}>
-              Lærere
-            </div>
+            <button
+              onClick={() => setLaerereKollapset((v) => !v)}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase",
+                color: "#1a1a1a", fontWeight: 700, fontFamily: "inherit",
+                padding: "4px 24px",
+                marginBottom: "8px",
+                width: "100%",
+                background: "transparent", border: "none",
+                cursor: "pointer", textAlign: "left",
+              }}
+              aria-expanded={!laerereKollapset}
+              aria-label={laerereKollapset ? "Vis lærere" : "Skjul lærere"}
+            >
+              <span>Lærere</span>
+              <ChevronDown
+                size={11}
+                style={{
+                  transform: laerereKollapset ? "rotate(-90deg)" : "rotate(0deg)",
+                  transition: "transform 0.15s ease",
+                  flexShrink: 0,
+                }}
+              />
+            </button>
 
-            {/* Lærer-liste — samme struktur som klasse-listen */}
-            <div style={{ margin: "0 -24px", padding: "0" }}>
+            {/* Lærer-liste — skjules ved kollaps, scroller internt ellers */}
+            <div style={{
+              flex: 1, overflowY: "auto", minHeight: 0,
+              display: laerereKollapset ? "none" : "block",
+            }}>
               {laerere.map((l) => {
                 const erAktiv = l.id === aktivLaererId && visning === "laerer";
                 const erUnderOmdoeb = l.id === omdoeberLaererId;
@@ -3059,12 +3243,11 @@ export default function Fagfordeling() {
                     key={l.id}
                     className={`klasse-menu-row${erAktiv ? " aktiv" : ""}`}
                     style={{
-                      position: "relative",
                       display: "flex", alignItems: "center",
-                      padding: "10px 24px 10px 38px",
+                      padding: "8px 24px",
                       cursor: erUnderOmdoeb ? "default" : "pointer",
-                      gap: "8px",
-                      minHeight: "44px",
+                      gap: "12px",
+                      minHeight: "36px",
                     }}
                     onClick={() => { if (!erUnderOmdoeb) skiftAktivLaerer(l.id); }}
                   >
@@ -3082,8 +3265,7 @@ export default function Fagfordeling() {
                         onBlur={() => omdoebLaerer(l.id, omdoebLaererNavn)}
                         style={{
                           flex: 1,
-                          fontFamily: "'Fraunces', Georgia, serif",
-                          fontSize: "16px", fontWeight: 500, color: "#1a1a1a",
+                          fontSize: "13px", fontWeight: 600, color: "#1a1a1a",
                           background: "transparent",
                           border: "none",
                           borderBottom: "1px solid #1a1a1a",
@@ -3094,26 +3276,17 @@ export default function Fagfordeling() {
                       />
                     ) : (
                       <>
-                        <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "baseline", gap: "10px" }}>
-                          <span className="klasse-menu-navn" style={{
-                            fontFamily: "'Fraunces', Georgia, serif",
-                            fontSize: "16px", fontWeight: 500,
-                            color: "#7a7367",
-                            transition: "color 0.12s",
-                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          }}>
-                            {l.navn}
-                          </span>
-                          <span style={{
-                            fontSize: "12px", color: "#7a7367",
-                            fontVariantNumeric: "tabular-nums",
-                            flexShrink: 0,
-                          }}>
-                            {fagAntal === 0 ? "—" : fagAntal}
-                          </span>
-                        </div>
+                        <span className="klasse-menu-navn" style={{
+                          flex: 1, minWidth: 0,
+                          fontSize: "13px", fontWeight: 600,
+                          color: "#7a7367",
+                          transition: "color 0.12s",
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>
+                          {l.navn}
+                        </span>
                         <div className="klasse-menu-actions" style={{
-                          display: "flex", gap: "2px",
+                          display: "flex", gap: "4px",
                           opacity: 0,
                           transition: "opacity 0.15s",
                           flexShrink: 0,
@@ -3125,11 +3298,11 @@ export default function Fagfordeling() {
                             style={{
                               background: "transparent", border: "none",
                               color: "#7a7367",
-                              cursor: "pointer", padding: "4px",
+                              cursor: "pointer", padding: "2px",
                               display: "flex",
                             }}
                           >
-                            <Pencil size={13} />
+                            <Pencil size={12} />
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); sletLaererHelt(l.id); }}
@@ -3138,11 +3311,11 @@ export default function Fagfordeling() {
                             style={{
                               background: "transparent", border: "none",
                               color: "#7a7367",
-                              cursor: "pointer", padding: "4px",
+                              cursor: "pointer", padding: "2px",
                               display: "flex",
                             }}
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={12} />
                           </button>
                         </div>
                       </>
@@ -3150,77 +3323,76 @@ export default function Fagfordeling() {
                   </div>
                 );
               })}
-            </div>
-
-            {/* MULTI-LAERER: "+ Tilføj lærer" — samme row-style som klasse-versionen */}
-            <div style={{ margin: "0 -24px" }}>
-              {hamburgerNyLaererAaben ? (
-                <div style={{
-                  position: "relative",
-                  display: "flex", alignItems: "center",
-                  padding: "10px 24px 10px 38px",
-                  gap: "8px",
-                  minHeight: "44px",
-                }}>
-                  <input
-                    autoFocus
-                    type="text"
-                    value={hamburgerNyLaererNavn}
-                    onChange={(e) => setHamburgerNyLaererNavn(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        tilfoejNyLaerer(hamburgerNyLaererNavn);
-                      } else if (e.key === "Escape") {
-                        setHamburgerNyLaererAaben(false);
-                        setHamburgerNyLaererNavn("");
-                      }
-                    }}
-                    onBlur={() => {
-                      if (hamburgerNyLaererNavn.trim()) {
-                        tilfoejNyLaerer(hamburgerNyLaererNavn);
-                      } else {
-                        setHamburgerNyLaererAaben(false);
-                      }
-                    }}
-                    style={{
-                      flex: 1,
-                      fontFamily: "'Fraunces', Georgia, serif",
-                      fontSize: "16px", fontWeight: 500, color: "#1a1a1a",
-                      background: "transparent",
-                      border: "none",
-                      borderBottom: "1px solid #1a1a1a",
-                      padding: "2px 0",
-                      outline: "none",
-                      minWidth: 0,
-                    }}
-                  />
-                </div>
-              ) : (
-                <button
-                  onClick={() => { setHamburgerNyLaererAaben(true); setHamburgerNyLaererNavn(""); }}
-                  className="klasse-menu-add"
+            {/* "+ Tilføj lærer" — sidder lige under sidste entry, scroller med listen */}
+            {hamburgerNyLaererAaben ? (
+              <div style={{
+                display: "flex", alignItems: "center",
+                padding: "8px 24px",
+                gap: "12px",
+                minHeight: "36px",
+              }}>
+                <input
+                  autoFocus
+                  type="text"
+                  value={hamburgerNyLaererNavn}
+                  onChange={(e) => setHamburgerNyLaererNavn(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      tilfoejNyLaerer(hamburgerNyLaererNavn);
+                    } else if (e.key === "Escape") {
+                      setHamburgerNyLaererAaben(false);
+                      setHamburgerNyLaererNavn("");
+                    }
+                  }}
+                  onBlur={() => {
+                    if (hamburgerNyLaererNavn.trim()) {
+                      tilfoejNyLaerer(hamburgerNyLaererNavn);
+                    } else {
+                      setHamburgerNyLaererAaben(false);
+                    }
+                  }}
                   style={{
-                    display: "flex", alignItems: "center",
-                    gap: "8px",
-                    padding: "10px 24px 10px 38px",
-                    minHeight: "44px",
-                    width: "100%",
-                    fontFamily: "'Fraunces', Georgia, serif",
-                    fontSize: "15px", fontWeight: 500,
-                    color: "#7a7367",
+                    flex: 1,
+                    fontSize: "13px", fontWeight: 600, color: "#1a1a1a",
                     background: "transparent",
                     border: "none",
-                    cursor: "pointer",
-                    textAlign: "left",
+                    borderBottom: "1px solid #1a1a1a",
+                    padding: "2px 0",
+                    outline: "none",
+                    minWidth: 0,
                   }}
-                >
-                  <Plus size={15} strokeWidth={1.75} /> Tilføj lærer
-                </button>
-              )}
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => { setHamburgerNyLaererAaben(true); setHamburgerNyLaererNavn(""); }}
+                className="klasse-menu-add"
+                style={{
+                  display: "flex", alignItems: "center",
+                  gap: "8px",
+                  padding: "6px 24px",
+                  minHeight: "30px",
+                  marginTop: "4px",
+                  width: "100%",
+                  fontSize: "12px", fontWeight: 500,
+                  color: "#cdc5b8",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <Plus size={12} /> Tilføj lærer
+              </button>
+            )}
+            </div>
             </div>
           </aside>
         </div>
       )}
+
+      {/* How-to modal — kort guide til hvordan appen bruges */}
+      {visHowTo && <HowToModal onLuk={() => setVisHowTo(false)} />}
 
       {/* Bekræftelses-modal for sletninger */}
       {bekraeftSlet && (
@@ -3406,16 +3578,23 @@ function klasseAvatarTekst(klasse) {
   return renset.slice(0, 2).toUpperCase() || "?";
 }
 
-// MIN-OVERSIGT: normaliserer klasse-input så "8a", "8A", "8.a", "8.A", "8,A",
-// "8,a", "8 A" alle bliver til "8.A". Ikke-standard input (fx "Lille klasse",
-// "8.AB", eller bare et tal/bogstav alene) returneres uændret bortset fra trim.
+// Normaliserer klasse-input til kanonisk form.
+// Kortform: ciffer + valgfri . eller , + ét bogstav UDEN whitespace mellem
+//   "8a", "8A", "8.a", "8.A", "8,a", "8,A" → "8.A"
+// Langform: ciffer + . + whitespace + ord (fx "4. klasse")
+//   → uppercase første bogstav af ordet: "4. Klasse"
+// Andet: trimmes uændret (fx "Lille klasse", "8.AB", "8 A").
 function normaliserKlasse(input) {
   if (!input) return "";
   const trimmed = input.trim();
   if (!trimmed) return "";
-  // Match: tal-præfix + valgfri separator (mellemrum/punktum/komma) + ét bogstav
-  const match = trimmed.match(/^(\d+)\s*[.,]?\s*([a-zæøåA-ZÆØÅ])$/);
-  if (match) return `${match[1]}.${match[2].toUpperCase()}`;
+  const kortForm = trimmed.match(/^(\d+)[.,]?([a-zæøåA-ZÆØÅ])$/);
+  if (kortForm) return `${kortForm[1]}.${kortForm[2].toUpperCase()}`;
+  const langForm = trimmed.match(/^(\d+)\.\s+(\S.*)$/);
+  if (langForm) {
+    const ord = langForm[2];
+    return `${langForm[1]}. ${ord.charAt(0).toUpperCase()}${ord.slice(1)}`;
+  }
   return trimmed;
 }
 
@@ -3738,6 +3917,138 @@ function StatLine({ fag, samletLektioner, oversigt, samletMangler, samletOver })
   );
 }
 
+function HowToModal({ onLuk }) {
+  const trin = [
+    {
+      titel: "Vælg klasse eller lærer",
+      tekst: "Start med ét overblik. Du kan tilføje begge dele bagefter via menuen øverst-til-venstre.",
+    },
+    {
+      titel: "Vælg klassetrin",
+      tekst: "Få vejledende UVM-fag automatisk indlæst. Tilføj selv tysk/fransk og evt. valgfag.",
+    },
+    {
+      titel: "Tilføj lærere",
+      tekst: "Brug \"+ Tilføj lærer\" i sidebaren og træk dem direkte til et fag. Eksisterende navne dukker op som forslag mens du skriver.",
+    },
+    {
+      titel: "Skift mellem klasser og lærere",
+      tekst: "Hamburger-menuen øverst-til-venstre viser alle klasser og lærere. Klik på en for at åbne dens overblik.",
+    },
+    {
+      titel: "Eksportér eller fortryd",
+      tekst: "Print som PDF når du er færdig — eller gem som backup-fil. Cmd/Ctrl+Z fortryder seneste ændring.",
+    },
+  ];
+  return (
+    <div
+      onClick={onLuk}
+      style={{
+        position: "fixed", inset: 0,
+        background: "rgba(26,26,26,0.4)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 200, padding: "20px",
+        animation: "fadeIn 0.15s ease",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#f5f1ea", maxWidth: "520px", width: "100%",
+          maxHeight: "85vh", overflowY: "auto",
+          border: "1px solid #1a1a1a",
+        }}
+      >
+        <div style={{
+          padding: "24px 28px 16px",
+          display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px",
+        }}>
+          <h3 style={{
+            fontFamily: "'Fraunces', Georgia, serif", fontSize: "24px",
+            fontWeight: 600, margin: 0,
+            color: "#1a1a1a", letterSpacing: "-0.01em",
+          }}>
+            Sådan bruger du appen
+          </h3>
+          <button
+            onClick={onLuk}
+            aria-label="Luk"
+            style={{
+              background: "transparent", border: "none",
+              color: "#7a7367", cursor: "pointer",
+              padding: "4px", display: "flex", flexShrink: 0,
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <ol style={{
+          margin: 0, padding: "0 28px 8px",
+          listStyle: "none", counterReset: "trin",
+        }}>
+          {trin.map((t, i) => (
+            <li
+              key={i}
+              style={{
+                counterIncrement: "trin",
+                position: "relative",
+                paddingLeft: "36px",
+                paddingBottom: "20px",
+                borderLeft: i < trin.length - 1 ? "1px dashed #cdc5b8" : "none",
+                marginLeft: "12px",
+              }}
+            >
+              <div style={{
+                position: "absolute",
+                left: "-13px", top: 0,
+                width: "26px", height: "26px",
+                borderRadius: "50%",
+                background: "#1a1a1a", color: "#f5f1ea",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontFamily: "'Fraunces', Georgia, serif",
+                fontSize: "13px", fontWeight: 500,
+              }}>
+                {i + 1}
+              </div>
+              <div style={{
+                fontFamily: "'Fraunces', Georgia, serif",
+                fontSize: "16px", fontWeight: 500, color: "#1a1a1a",
+                marginBottom: "4px",
+              }}>
+                {t.titel}
+              </div>
+              <div style={{
+                fontSize: "13px", color: "#7a7367",
+                lineHeight: 1.5,
+              }}>
+                {t.tekst}
+              </div>
+            </li>
+          ))}
+        </ol>
+        <div style={{
+          padding: "12px 28px 24px",
+          display: "flex", justifyContent: "flex-end",
+        }}>
+          <button
+            onClick={onLuk}
+            style={{
+              padding: "10px 20px",
+              fontFamily: "'Fraunces', Georgia, serif",
+              fontSize: "15px", fontWeight: 500,
+              background: "#1a1a1a", color: "#f5f1ea",
+              border: "1px solid #1a1a1a",
+              cursor: "pointer",
+            }}
+          >
+            Forstået
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ConfirmModal({ titel, tekst, bekraeftTekst = "Slet", onBekraeft, onAnnuller, farligt = true }) {
   return (
     <div
@@ -3956,6 +4267,7 @@ function SortableLaererRow({
           borderBottom: "1px solid transparent", padding: "4px 0",
           lineHeight: 1.4,
         }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") e.target.blur(); }}
         onFocus={(e) => e.target.style.borderBottomColor = "#cdc5b8"}
         onBlur={(e) => {
           e.target.style.borderBottomColor = "transparent";
@@ -3973,6 +4285,7 @@ function SortableLaererRow({
           opdaterLaerer(fagId, l.id, { lektioner: v === "" ? "" : (parseInt(v) || 0) });
         }}
         onFocus={(e) => e.target.select()}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") e.target.blur(); }}
         onBlur={() => {
           if (l.lektioner === "" || l.lektioner === undefined) {
             opdaterLaerer(fagId, l.id, { lektioner: 0 });
@@ -4073,6 +4386,7 @@ function SortableFagCard({
           onChange={(navn) => opdaterFag(f.id, { navn })}
           suggestions={STANDARD_FAG}
           onAccept={focusLektFirstTime}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") e.target.blur(); }}
           onBlur={() => {
             if (f.navn.trim().length > 0) focusLektFirstTime();
           }}
@@ -4114,6 +4428,7 @@ function SortableFagCard({
               opdaterFag(f.id, { lektioner: v === "" ? "" : (parseInt(v) || 0) });
             }}
             onFocus={(e) => e.target.select()}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") e.target.blur(); }}
             onBlur={() => {
               if (f.lektioner === "" || f.lektioner === undefined) {
                 opdaterFag(f.id, { lektioner: 0 });
@@ -4280,7 +4595,7 @@ function SortableFagCard({
                   background: "transparent", border: "none", cursor: "pointer",
                 }}
               >
-                <Plus size={14} /> Tilføj lærer
+                <Plus size={12} /> Tilføj lærer
                 {f.laerere.length === 2 && <span style={{ color: "#7a7367", fontWeight: 400 }}>(3. lærer)</span>}
               </button>
             ) : <div />}
