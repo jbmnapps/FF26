@@ -580,14 +580,18 @@ export default function Fagfordeling() {
     return () => clearTimeout(t);
   }, [gemFejlet]);
 
-  // MULTI-LAERER: auto-fald-tilbage til klasse-view hvis vi er i lærer-view
-  // men ingen lærere eksisterer (fx efter sletning af sidste lærer eller load
-  // med tom liste). Forhindrer "tomt skærmbillede".
+  // Auto-fald-tilbage mellem visninger ved tomme lister:
+  // - lærer-view + 0 lærere → klasse-view
+  // - klasse-view + 0 klasser + 1+ lærere → lærer-view
+  // - 0 klasser + 0 lærere håndteres af empty-state choice-screen
   useEffect(() => {
-    if (loaded && visning === "laerer" && laerere.length === 0) {
+    if (!loaded) return;
+    if (visning === "laerer" && laerere.length === 0 && klasser.length > 0) {
       setVisning("klasse");
+    } else if (visning === "klasse" && klasser.length === 0 && laerere.length > 0) {
+      setVisning("laerer");
     }
-  }, [loaded, visning, laerere.length]);
+  }, [loaded, visning, laerere.length, klasser.length]);
 
   // Undo: spor data-ændringer og commit tidligere snapshot efter 500ms idle
   // (så typing-bursts ikke fylder stack'en).
@@ -1122,11 +1126,21 @@ export default function Fagfordeling() {
   // Empty-state-valg ved første åbning: bruger vælger om de vil starte med
   // klasse-overblik eller lærer-overblik. Begge muligheder kan kombineres
   // bagefter, men start-pointen sætter konteksten.
+  // autofokusKlasseTitel triggrer auto-focus + select på titel-input når en
+  // klasse er lige oprettet — så bruger ser cursor i titlen og kan straks
+  // taste sit navn uden at lede efter affordancen.
+  const klasseTitelRef = React.useRef(null);
+  const [autofokusKlasseTitel, setAutofokusKlasseTitel] = useState(false);
+  const [klasseTitelHover, setKlasseTitelHover] = useState(false);
+  const [klasseTitelFocus, setKlasseTitelFocus] = useState(false);
+
   const startMedKlasse = () => {
     const id = nytId();
     setKlasser([{ id, navn: "Min klasse", fag: [] }]);
     setAktivKlasseId(id);
     setVisning("klasse");
+    setMenuAaben(false);
+    setAutofokusKlasseTitel(true);
   };
 
   const startMedLaerer = () => {
@@ -1137,7 +1151,16 @@ export default function Fagfordeling() {
     }]);
     setAktivLaererId(id);
     setVisning("laerer");
+    setMenuAaben(false);
   };
+
+  useEffect(() => {
+    if (autofokusKlasseTitel && klasseTitelRef.current) {
+      klasseTitelRef.current.focus();
+      klasseTitelRef.current.select();
+      setAutofokusKlasseTitel(false);
+    }
+  }, [autofokusKlasseTitel]);
 
   // MULTI-CLASS: operationer på klasse-arrayet. Tilfoej accepterer nu et navn
   // fra hamburger-input-flowet (dashed-style); falder tilbage til "Klasse N"
@@ -1358,7 +1381,6 @@ export default function Fagfordeling() {
   const migMangler = mig.maalLektioner !== null ? mig.maalLektioner - migSamletLektioner : null;
 
   const sletKlasse = (k) => {
-    if (klasser.length <= 1) return; // mindst én klasse skal eksistere
     setBekraeftSlet({
       titel: `Slet "${k.navn}"?`,
       tekst: `Hele klassen og alle dens fag og lærere slettes. Det kan ikke fortrydes.`,
@@ -1367,7 +1389,14 @@ export default function Fagfordeling() {
         const tilbage = klasser.filter(x => x.id !== k.id);
         setKlasser(tilbage);
         if (k.id === aktivKlasseId) {
-          setAktivKlasseId(tilbage[0].id);
+          if (tilbage.length > 0) {
+            setAktivKlasseId(tilbage[0].id);
+          } else {
+            // Sidste klasse slettet — lad aktivKlasseId være, og hvis der er
+            // lærere, skift til lærer-view; ellers viser empty-state-skærmen.
+            setAktivKlasseId(null);
+            if (laerere.length > 0) setVisning("laerer");
+          }
           setUdfoldede(new Set());
           setValgtKlassetrin(null);
           setPendingNavne([]);
@@ -1922,32 +1951,58 @@ export default function Fagfordeling() {
             alignItems: "center", gap: "16px",
           }}>
             {visning === "klasse" ? (
-              <input
-                className="klasse-titel"
-                type="text"
-                value={klasseNavn}
-                onChange={(e) => setKlasseNavn(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") e.target.blur(); }}
-                onBlur={() => {
-                  const normaliseret = normaliserKlasse(klasseNavn);
-                  if (normaliseret && normaliseret !== klasseNavn) setKlasseNavn(normaliseret);
-                }}
+              <div
+                onMouseEnter={() => setKlasseTitelHover(true)}
+                onMouseLeave={() => setKlasseTitelHover(false)}
                 style={{
-                  fontFamily: "'Fraunces', Georgia, serif",
-                  fontSize: "44px",
-                  fontWeight: 600,
-                  letterSpacing: "-0.02em",
-                  color: "#1a1a1a",
-                  background: "transparent",
-                  border: "none",
-                  padding: "0",
-                  lineHeight: 1,
-                  fieldSizing: "content",
-                  minWidth: "60px",
-                  maxWidth: "100%",
-                  flex: "0 1 auto",
+                  display: "inline-flex", alignItems: "center", gap: "10px",
+                  flex: "0 1 auto", minWidth: 0, maxWidth: "100%",
                 }}
-              />
+              >
+                <input
+                  ref={klasseTitelRef}
+                  className="klasse-titel"
+                  type="text"
+                  value={klasseNavn}
+                  onChange={(e) => setKlasseNavn(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") e.target.blur(); }}
+                  onFocus={() => setKlasseTitelFocus(true)}
+                  onBlur={() => {
+                    setKlasseTitelFocus(false);
+                    const normaliseret = normaliserKlasse(klasseNavn);
+                    if (normaliseret && normaliseret !== klasseNavn) setKlasseNavn(normaliseret);
+                  }}
+                  title="Klik for at omdøbe"
+                  style={{
+                    fontFamily: "'Fraunces', Georgia, serif",
+                    fontSize: "44px",
+                    fontWeight: 600,
+                    letterSpacing: "-0.02em",
+                    color: "#1a1a1a",
+                    background: "transparent",
+                    border: "none",
+                    borderBottom: klasseTitelFocus
+                      ? "1px solid #1a1a1a"
+                      : (klasseTitelHover ? "1px dashed #cdc5b8" : "1px dashed transparent"),
+                    padding: "0 0 2px",
+                    lineHeight: 1,
+                    fieldSizing: "content",
+                    minWidth: "60px",
+                    maxWidth: "100%",
+                    transition: "border-color 0.12s",
+                  }}
+                />
+                <Pencil
+                  size={16}
+                  aria-hidden="true"
+                  style={{
+                    color: "#cdc5b8",
+                    opacity: klasseTitelHover && !klasseTitelFocus ? 1 : 0,
+                    transition: "opacity 0.15s",
+                    flexShrink: 0,
+                  }}
+                />
+              </div>
             ) : (
               /* MULTI-LAERER: header viser aktiv-lærers navn + lille mål-undertekst */
               <div style={{ display: "flex", flexDirection: "column", gap: "4px", flex: "0 1 auto", minWidth: 0 }}>
@@ -3114,12 +3169,11 @@ export default function Fagfordeling() {
                           <button
                             onClick={(e) => { e.stopPropagation(); sletKlasse(k); }}
                             aria-label={`Slet ${k.navn}`}
-                            title={klasser.length <= 1 ? "Mindst én klasse skal eksistere" : "Slet klasse"}
-                            disabled={klasser.length <= 1}
+                            title="Slet klasse"
                             style={{
                               background: "transparent", border: "none",
-                              color: klasser.length <= 1 ? "#cdc5b8" : "#7a7367",
-                              cursor: klasser.length <= 1 ? "not-allowed" : "pointer",
+                              color: "#7a7367",
+                              cursor: "pointer",
                               padding: "2px",
                               display: "flex",
                             }}
