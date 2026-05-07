@@ -3135,16 +3135,16 @@ function SidebarKlasseRow({ klasse, total, fag, pending = false }) {
             {klasseAvatarTekst(klasse)}
           </div>
           <span className="laerer-navn" style={{
-            fontFamily: "'Fraunces', Georgia, serif",
-            fontSize: "15px", fontWeight: 500,
+            fontSize: "13px", fontWeight: 600,
             color: pending ? "#7a7367" : "#1a1a1a",
+            lineHeight: 1.2,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>
             {klasse}
           </span>
         </div>
         <span className="laerer-total" style={{
-          fontSize: "16px", fontWeight: 500,
+          fontSize: "13px", fontWeight: 500,
           color: pending ? "#cdc5b8" : "#1a1a1a",
           fontVariantNumeric: "tabular-nums",
           flexShrink: 0,
