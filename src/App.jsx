@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { Plus, Trash2, Download, Upload, X, Users, BookOpen, AlertCircle, CheckCircle2, Circle, ChevronDown, GripVertical, RotateCcw, Menu, Pencil, Check } from "lucide-react";
-import { DndContext, DragOverlay, closestCorners, pointerWithin, rectIntersection, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, MeasuringStrategy } from "@dnd-kit/core";
+import React, { useState, useEffect, useMemo } from "react";
+import { Plus, Trash2, Download, Upload, X, Users, BookOpen, AlertCircle, CheckCircle2, Circle, ChevronDown, RotateCcw, Menu, Pencil, Undo2 } from "lucide-react";
+import { DndContext, DragOverlay, closestCorners, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, MeasuringStrategy } from "@dnd-kit/core";
 import { SortableContext, useSortable, rectSortingStrategy, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
@@ -747,12 +747,6 @@ export default function Fagfordeling() {
     (sum, f) => sum + (parseInt(f.lektioner) || 0),
     0
   );
-  const dækketLektioner = fag.reduce(
-    (sum, f) =>
-      sum + f.laerere.reduce((s, l) => s + (parseInt(l.lektioner) || 0), 0),
-    0
-  );
-  const fuldtDækkede = fag.filter((f) => fagStatus(f).status === "grøn").length;
 
   // Samlet manglende lærer-lektioner: team-teaching-model.
   // Target pr. fag = fagLekt × antal lærere (forventede eller faktisk navngivne, alt efter
@@ -1293,7 +1287,7 @@ export default function Fagfordeling() {
   };
 
   const statusFarver = {
-    tom: { bg: "#fff", border: "#cdc5b8", tekst: "#9a9387", label: "Tom" },
+    tom: { bg: "#fff", border: "#cdc5b8", tekst: "#7a7367", label: "Tom" },
     rød: { bg: "#fce8e6", border: "#d93025", tekst: "#9d2517", label: "Mangler" },
     gul: { bg: "#fef7e0", border: "#e8a317", tekst: "#7a5400", label: "Delvis" },
     grøn: { bg: "#e6f4ea", border: "#1e8e3e", tekst: "#0d652d", label: "OK" },
@@ -1306,16 +1300,16 @@ export default function Fagfordeling() {
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap');
         * { box-sizing: border-box; }
         input, button { font-family: inherit; }
-        input:focus { outline: 2px solid #2d5016; outline-offset: 1px; }
-        .fag-input::placeholder { color: #9a9387; }
+        input:focus { outline: 2px solid #1a1a1a; outline-offset: 1px; }
+        .fag-input::placeholder { color: #7a7367; }
         .icon-btn { transition: all 0.15s ease; }
         .icon-btn:hover { background: rgba(0,0,0,0.06); }
         .laerer-row { transition: background 0.15s ease; }
         .laerer-row:hover { background: rgba(0,0,0,0.02); }
         .header-btn { transition: all 0.15s ease; }
-        .header-btn:hover { background: #2d5016; color: #f5f1ea; }
+        .header-btn:hover { background: #1a1a1a; color: #f5f1ea; }
         .add-fag-btn { transition: all 0.2s ease; }
-        .add-fag-btn:hover { background: #2d5016; color: #f5f1ea; transform: translateY(-1px); }
+        .add-fag-btn:hover { background: #1a1a1a; color: #f5f1ea; transform: translateY(-1px); }
         input[type=number]::-webkit-inner-spin-button,
         input[type=number]::-webkit-outer-spin-button {
           -webkit-appearance: none; margin: 0;
@@ -1347,7 +1341,7 @@ export default function Fagfordeling() {
           content: ""; position: absolute; left: 0; top: 12px; bottom: 12px;
           width: 2px; background: #1a1a1a;
         }
-        .klasse-menu-add { color: #5a5448; transition: color 0.12s; }
+        .klasse-menu-add { color: #7a7367; transition: color 0.12s; }
         .klasse-menu-add:hover { color: #1a1a1a !important; }
         .fag-card { animation: fadeIn 0.25s ease; }
         .mobile-fag-tile:active { transform: scale(0.97); transition: transform 0.1s; }
@@ -1455,7 +1449,7 @@ export default function Fagfordeling() {
           .main-grid {
             display: grid !important;
             grid-template-columns: minmax(0, 1fr) 264px !important;
-            gap: 16px !important;
+            gap: 14px !important;
             align-items: start !important;
           }
           .laerere-aside {
@@ -1711,7 +1705,7 @@ export default function Fagfordeling() {
                         }}>
                           Som PDF
                         </div>
-                        <div style={{ marginLeft: "auto", fontSize: "11px", color: "#9a9387" }}>
+                        <div style={{ marginLeft: "auto", fontSize: "11px", color: "#7a7367" }}>
                           print →
                         </div>
                       </button>
@@ -1737,7 +1731,7 @@ export default function Fagfordeling() {
                         }}>
                           Som data-fil
                         </div>
-                        <div style={{ marginLeft: "auto", fontSize: "11px", color: "#9a9387" }}>
+                        <div style={{ marginLeft: "auto", fontSize: "11px", color: "#7a7367" }}>
                           .json
                         </div>
                       </button>
@@ -1754,7 +1748,7 @@ export default function Fagfordeling() {
                   display: "flex", alignItems: "center", gap: "6px",
                   padding: "8px 10px", fontSize: "13px",
                   background: "transparent", border: "1px solid #cdc5b8",
-                  color: "#9a9387", borderRadius: "0", cursor: "pointer",
+                  color: "#7a7367", borderRadius: "0", cursor: "pointer",
                 }}
               >
                 <RotateCcw size={14} />
@@ -1921,7 +1915,7 @@ export default function Fagfordeling() {
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-        <div className="main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 264px", gap: "16px", alignItems: "start" }}>
+        <div className="main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 264px", gap: "14px", alignItems: "start" }}>
           {/* Venstre: Fag */}
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "10px" }}>
@@ -2039,7 +2033,7 @@ export default function Fagfordeling() {
                   </div>
                 )}
                 <div style={{
-                  textAlign: "center", fontSize: "12px", color: "#9a9387",
+                  textAlign: "center", fontSize: "12px", color: "#7a7367",
                   paddingTop: "16px", borderTop: "1px solid #f0ead9",
                 }}>
                   {valgtKlassetrin === null ? (
@@ -2049,7 +2043,7 @@ export default function Fagfordeling() {
                         onClick={tilfoejFag}
                         style={{
                           background: "transparent", border: "none",
-                          color: "#5a5448", cursor: "pointer",
+                          color: "#7a7367", cursor: "pointer",
                           fontSize: "12px", textDecoration: "underline",
                           padding: 0,
                         }}
@@ -2062,7 +2056,7 @@ export default function Fagfordeling() {
                       onClick={() => setValgtKlassetrin(null)}
                       style={{
                         background: "transparent", border: "none",
-                        color: "#5a5448", cursor: "pointer",
+                        color: "#7a7367", cursor: "pointer",
                         fontSize: "12px", textDecoration: "underline",
                         padding: 0,
                       }}
@@ -2136,14 +2130,14 @@ export default function Fagfordeling() {
               }}>
                 Lærere
               </h2>
-              <span style={{ fontSize: "12px", color: "#9a9387", fontWeight: 500 }}>
+              <span style={{ fontSize: "12px", color: "#7a7367", fontWeight: 500 }}>
                 {oversigt.length} i alt
               </span>
             </div>
 
             <div style={{ background: "transparent" }}>
               {oversigt.length === 0 && !tilfoejNavnAaben ? (
-                <div style={{ padding: "32px 14px", textAlign: "center", color: "#9a9387" }}>
+                <div style={{ padding: "32px 14px", textAlign: "center", color: "#7a7367" }}>
                   <Users size={24} style={{ marginBottom: "8px", opacity: 0.5 }} />
                   <div style={{ fontSize: "13px" }}>Ingen lærere endnu</div>
                 </div>
@@ -2202,7 +2196,7 @@ export default function Fagfordeling() {
                   data-no-print="true"
                   style={{
                     width: "100%", padding: "8px 10px",
-                    fontSize: "13px", fontWeight: 500, color: "#5a5448",
+                    fontSize: "13px", fontWeight: 500, color: "#7a7367",
                     background: "transparent", border: "1px dashed #cdc5b8",
                     cursor: "pointer",
                     display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
@@ -2316,7 +2310,7 @@ export default function Fagfordeling() {
                   onClick={() => setMigEmptyTrin(1)}
                   style={{
                     background: "transparent", border: "none",
-                    color: "#5a5448", cursor: "pointer",
+                    color: "#7a7367", cursor: "pointer",
                     fontSize: "12px", textDecoration: "underline",
                     padding: 0,
                   }}
@@ -2370,7 +2364,7 @@ export default function Fagfordeling() {
               onDragStart={handleMinDragStart}
               onDragEnd={handleMinDragEnd}
             >
-              <div className="main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 264px", gap: "16px", alignItems: "start" }}>
+              <div className="main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 264px", gap: "14px", alignItems: "start" }}>
                 {/* Venstre: dine fag */}
                 <div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "10px" }}>
@@ -2436,7 +2430,7 @@ export default function Fagfordeling() {
                   {(migOversigt.length === 0 && pendingKlasser.length === 0) && (
                     <div style={{
                       padding: "16px 14px", fontSize: "13px",
-                      color: "#9a9387", fontStyle: "italic",
+                      color: "#7a7367", fontStyle: "italic",
                     }}>
                       Tilføj klasser herunder eller skriv direkte i et fag-kort.
                     </div>
@@ -2491,7 +2485,7 @@ export default function Fagfordeling() {
                         className="add-laerer-btn"
                         style={{
                           width: "100%", padding: "8px 10px",
-                          fontSize: "13px", fontWeight: 500, color: "#5a5448",
+                          fontSize: "13px", fontWeight: 500, color: "#7a7367",
                           background: "transparent", border: "1px dashed #cdc5b8",
                           cursor: "pointer",
                           display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
@@ -2588,7 +2582,7 @@ export default function Fagfordeling() {
               </button>
             </div>
             <div style={{ padding: "20px" }}>
-              <p style={{ fontSize: "13px", color: "#5a5448", marginTop: 0, marginBottom: "16px" }}>
+              <p style={{ fontSize: "13px", color: "#7a7367", marginTop: 0, marginBottom: "16px" }}>
                 Vælg en tidligere eksporteret fagfordelings-fil (.json).
                 Den nuværende klasse bliver erstattet.
               </p>
@@ -2669,7 +2663,7 @@ export default function Fagfordeling() {
             {/* Eyebrow — diskret label, ikke en header med ramme */}
             <div style={{
               fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase",
-              color: "#9a9387", fontWeight: 500,
+              color: "#7a7367", fontWeight: 500,
               marginBottom: "18px", paddingLeft: "14px",
             }}>
               Klasser
@@ -2727,14 +2721,14 @@ export default function Fagfordeling() {
                           <span className="klasse-menu-navn" style={{
                             fontFamily: "'Fraunces', Georgia, serif",
                             fontSize: "16px", fontWeight: 500,
-                            color: "#5a5448",
+                            color: "#7a7367",
                             transition: "color 0.12s",
                             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                           }}>
                             {k.navn}
                           </span>
                           <span style={{
-                            fontSize: "12px", color: "#9a9387",
+                            fontSize: "12px", color: "#7a7367",
                             fontVariantNumeric: "tabular-nums",
                             flexShrink: 0,
                           }}>
@@ -2753,7 +2747,7 @@ export default function Fagfordeling() {
                             title="Omdøb"
                             style={{
                               background: "transparent", border: "none",
-                              color: "#9a9387",
+                              color: "#7a7367",
                               cursor: "pointer", padding: "4px",
                               display: "flex",
                             }}
@@ -2767,7 +2761,7 @@ export default function Fagfordeling() {
                             disabled={klasser.length <= 1}
                             style={{
                               background: "transparent", border: "none",
-                              color: klasser.length <= 1 ? "#cdc5b8" : "#9a9387",
+                              color: klasser.length <= 1 ? "#cdc5b8" : "#7a7367",
                               cursor: klasser.length <= 1 ? "not-allowed" : "pointer",
                               padding: "4px",
                               display: "flex",
@@ -2811,7 +2805,7 @@ export default function Fagfordeling() {
             }} />
             <div style={{
               fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase",
-              color: "#9a9387", fontWeight: 500,
+              color: "#7a7367", fontWeight: 500,
               marginBottom: "10px", paddingLeft: "14px",
             }}>
               Personligt
@@ -2833,14 +2827,14 @@ export default function Fagfordeling() {
                 <span className="klasse-menu-navn" style={{
                   fontFamily: "'Fraunces', Georgia, serif",
                   fontSize: "16px", fontWeight: 500,
-                  color: "#5a5448",
+                  color: "#7a7367",
                   transition: "color 0.12s",
                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                 }}>
                   Min oversigt
                 </span>
                 <span style={{
-                  fontSize: "12px", color: "#9a9387",
+                  fontSize: "12px", color: "#7a7367",
                   fontVariantNumeric: "tabular-nums",
                   flexShrink: 0,
                 }}>
@@ -2877,11 +2871,11 @@ function MinManglerBox({ mangler, maal, antalFag }) {
     label = "Mål";
     hovedTal = "—";
     undertekst = "Sæt et mål i headeren";
-    talFarve = "#9a9387";
+    talFarve = "#7a7367";
   } else if (antalFag === 0) {
     hovedTal = maal;
     undertekst = "Tilføj fag for at fordele";
-    talFarve = "#9a9387";
+    talFarve = "#7a7367";
   } else if (mangler > 0) {
     hovedTal = mangler;
     undertekst = mangler === 1 ? `1 lektion mangler · mål ${maal}` : `${mangler} lektioner mangler · mål ${maal}`;
@@ -3058,7 +3052,7 @@ function MinFagCard({ f, opdater, slet }) {
         style={{
           position: "absolute", top: "8px", right: "8px",
           background: "transparent", border: "none",
-          color: "#9a9387", cursor: "pointer", padding: "4px",
+          color: "#7a7367", cursor: "pointer", padding: "4px",
           opacity: hover ? 1 : 0, transition: "opacity 0.12s",
           display: "flex", zIndex: 2,
         }}
@@ -3126,14 +3120,14 @@ function MinFagCard({ f, opdater, slet }) {
             className="fag-card-lekt-input"
             style={{
               fontFamily: "'Fraunces', Georgia, serif",
-              fontSize: "16px", fontWeight: 500, color: "#5a5448",
+              fontSize: "16px", fontWeight: 500, color: "#7a7367",
               background: "transparent", border: "none",
               padding: 0, textAlign: "left",
               outline: "none",
             }}
           />
           <span className="fag-card-lekt-label" style={{
-            fontSize: "12px", color: "#9a9387",
+            fontSize: "12px", color: "#7a7367",
           }}>
             lektioner
           </span>
@@ -3208,7 +3202,7 @@ function StatusBox({ samletMangler, samletOver, antalFag }) {
 
   let talFarve, label, hovedTal, undertekst;
   if (antalFag === 0) {
-    talFarve = "#9a9387";
+    talFarve = "#7a7367";
     label = "Status";
     hovedTal = "—";
     undertekst = "Tilføj dit første fag for at komme i gang";
@@ -3260,7 +3254,7 @@ function StatLine({ fag, samletLektioner, oversigt, samletMangler, samletOver })
   let statusTekst, statusFarve;
   if (fag.length === 0) {
     statusTekst = "Tom";
-    statusFarve = "#9a9387";
+    statusFarve = "#7a7367";
   } else if (samletMangler === 0 && samletOver === 0) {
     statusTekst = "Alt går op";
     statusFarve = "#3d7a4e";
@@ -3351,7 +3345,7 @@ function ConfirmModal({ titel, tekst, bekraeftTekst = "Slet", onBekraeft, onAnnu
             {titel}
           </h3>
           <p style={{
-            fontSize: "13px", color: "#5a5448", margin: 0, lineHeight: 1.5,
+            fontSize: "13px", color: "#7a7367", margin: 0, lineHeight: 1.5,
           }}>
             {tekst}
           </p>
@@ -3436,13 +3430,13 @@ function SidebarLaererRow({ l }) {
           {l.fag.map((fa, j) => (
             <span key={j} title={fa.fagNavn} style={{
               fontSize: "11px",
-              color: "#9a9387",
+              color: "#7a7367",
               fontWeight: 400,
               lineHeight: 1.3,
               whiteSpace: "nowrap",
             }}>
               {fagForkortelse(fa.fagNavn)}{" "}
-              <span style={{ color: "#5a5448" }}>
+              <span style={{ color: "#7a7367" }}>
                 {fa.lektioner}
               </span>
             </span>
@@ -3503,7 +3497,7 @@ function SortableLaererRow({
           {l.navn}
         </span>
         <span style={{
-          fontSize: "11px", color: "#9a9387",
+          fontSize: "11px", color: "#7a7367",
           flexShrink: 0,
         }}>
           {lekt} lek
@@ -3574,14 +3568,14 @@ function SortableLaererRow({
           flexShrink: 0,
         }}
       />
-      <span style={{ fontSize: "12px", color: "#9a9387", flexShrink: 0 }}>lek</span>
+      <span style={{ fontSize: "12px", color: "#7a7367", flexShrink: 0 }}>lek</span>
       {allowDelete && (
         <button
           onClick={() => sletLaerer(fagId, l.id)}
           className="icon-btn"
           style={{
             padding: "4px", background: "transparent",
-            border: "none", cursor: "pointer", color: "#9a9387",
+            border: "none", cursor: "pointer", color: "#7a7367",
             flexShrink: 0,
           }}
         >
@@ -3708,13 +3702,13 @@ function SortableFagCard({
             }}
             style={{
               fontFamily: "'Fraunces', Georgia, serif",
-              fontSize: "16px", fontWeight: 500, color: "#5a5448",
+              fontSize: "16px", fontWeight: 500, color: "#7a7367",
               background: "transparent", border: "none",
               padding: "0", textAlign: "left",
             }}
           />
           <span className="fag-card-lekt-label" style={{
-            fontSize: "12px", color: "#9a9387",
+            fontSize: "12px", color: "#7a7367",
           }}>
             lektioner
           </span>
@@ -3750,7 +3744,7 @@ function SortableFagCard({
           className="icon-btn"
           style={{
             padding: "4px", background: "transparent",
-            border: "none", cursor: "pointer", color: "#9a9387",
+            border: "none", cursor: "pointer", color: "#7a7367",
             flexShrink: 0,
           }}
           title={erUdfoldet ? "Fold sammen" : "Fold ud"}
@@ -3818,7 +3812,7 @@ function SortableFagCard({
                     style={{
                       width: "28px", height: "28px",
                       background: aktiv ? "#1a1a1a" : "transparent",
-                      color: aktiv ? "#f5f1ea" : "#5a5448",
+                      color: aktiv ? "#f5f1ea" : "#7a7367",
                       border: `1px solid ${aktiv ? "#1a1a1a" : "#cdc5b8"}`,
                       cursor: "pointer",
                       fontSize: "13px", fontWeight: 600,
@@ -3863,12 +3857,12 @@ function SortableFagCard({
                 style={{
                   display: "flex", alignItems: "center", gap: "6px",
                   padding: "4px 0",
-                  fontSize: "13px", fontWeight: 500, color: "#5a5448",
+                  fontSize: "13px", fontWeight: 500, color: "#7a7367",
                   background: "transparent", border: "none", cursor: "pointer",
                 }}
               >
                 <Plus size={14} /> Tilføj lærer
-                {f.laerere.length === 2 && <span style={{ color: "#9a9387", fontWeight: 400 }}>(3. lærer)</span>}
+                {f.laerere.length === 2 && <span style={{ color: "#7a7367", fontWeight: 400 }}>(3. lærer)</span>}
               </button>
             ) : <div />}
             <button
@@ -3876,7 +3870,7 @@ function SortableFagCard({
               style={{
                 display: "flex", alignItems: "center", gap: "6px",
                 padding: "4px 8px",
-                fontSize: "12px", color: "#9a9387",
+                fontSize: "12px", color: "#7a7367",
                 background: "transparent", border: "none", cursor: "pointer",
               }}
               title="Slet fag"
@@ -3952,10 +3946,10 @@ function MobileTabs({ tab, setTab, fagAntal, laererAntal }) {
   return (
     <div style={{ display: "flex", borderBottom: "1px solid #e0d9ca", background: "#fff" }}>
       <button onClick={() => setTab("fag")} style={tabStyle(tab === "fag")}>
-        Fag <span style={{ fontSize: "12px", color: "#9a9387", fontWeight: 500 }}>{fagAntal}</span>
+        Fag <span style={{ fontSize: "12px", color: "#7a7367", fontWeight: 500 }}>{fagAntal}</span>
       </button>
       <button onClick={() => setTab("laerere")} style={tabStyle(tab === "laerere")}>
-        Lærere <span style={{ fontSize: "12px", color: "#9a9387", fontWeight: 500 }}>{laererAntal}</span>
+        Lærere <span style={{ fontSize: "12px", color: "#7a7367", fontWeight: 500 }}>{laererAntal}</span>
       </button>
     </div>
   );
@@ -4123,7 +4117,7 @@ function MobileLaererRowEdit({ fag, laerer, opdaterLaerer, sletLaerer, eksistere
         onClick={() => sletLaerer(fag.id, laerer.id)}
         style={{
           background: "transparent", border: "none",
-          padding: "6px", cursor: "pointer", color: "#9a9387",
+          padding: "6px", cursor: "pointer", color: "#7a7367",
           flexShrink: 0,
         }}
         aria-label="Fjern lærer"
