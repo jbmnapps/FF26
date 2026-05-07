@@ -435,6 +435,15 @@ export default function Fagfordeling() {
   // Vises som toast nederst hvis localStorage.setItem fejler (typisk quota fyldt
   // eller Safari Privat tilstand). Rydder selv efter 6 sekunder.
   const [gemFejlet, setGemFejlet] = useState(false);
+  // Undo: snapshot-stack af tidligere data-tilstande (klasser, aktivKlasseId,
+  // mig, pendingNavne, pendingKlasser). Snapshots commiteres efter 500ms idle
+  // så typing samles til ét undo-skridt. Stack-størrelse: 30.
+  const historyRef = React.useRef([]);
+  const previousSnapshotRef = React.useRef(null);
+  const skipNextHistoryRef = React.useRef(false);
+  const historyInitializedRef = React.useRef(false);
+  const historyDebounceRef = React.useRef(null);
+  const [canUndo, setCanUndo] = useState(false);
   const importFilRef = React.useRef(null);
   const [udfoldede, setUdfoldede] = useState(new Set());
 
@@ -527,6 +536,74 @@ export default function Fagfordeling() {
     const t = setTimeout(() => setGemFejlet(false), 6000);
     return () => clearTimeout(t);
   }, [gemFejlet]);
+
+  // Undo: spor data-ændringer og commit tidligere snapshot efter 500ms idle
+  // (så typing-bursts ikke fylder stack'en).
+  useEffect(() => {
+    if (!loaded) return;
+    const current = { klasser, aktivKlasseId, mig, pendingNavne, pendingKlasser };
+    if (skipNextHistoryRef.current) {
+      skipNextHistoryRef.current = false;
+      previousSnapshotRef.current = current;
+      return;
+    }
+    if (!historyInitializedRef.current) {
+      historyInitializedRef.current = true;
+      previousSnapshotRef.current = current;
+      return;
+    }
+    if (historyDebounceRef.current) clearTimeout(historyDebounceRef.current);
+    const snapToCommit = previousSnapshotRef.current;
+    historyDebounceRef.current = setTimeout(() => {
+      historyRef.current.push(snapToCommit);
+      if (historyRef.current.length > 30) historyRef.current.shift();
+      setCanUndo(true);
+      previousSnapshotRef.current = current;
+    }, 500);
+  }, [klasser, aktivKlasseId, mig, pendingNavne, pendingKlasser, loaded]);
+
+  const undo = React.useCallback(() => {
+    // Commit pending debounce nu, så seneste burst bliver et fortrydbart skridt
+    if (historyDebounceRef.current) {
+      clearTimeout(historyDebounceRef.current);
+      historyDebounceRef.current = null;
+      if (previousSnapshotRef.current) {
+        historyRef.current.push(previousSnapshotRef.current);
+        if (historyRef.current.length > 30) historyRef.current.shift();
+      }
+    }
+    if (historyRef.current.length === 0) {
+      setCanUndo(false);
+      return;
+    }
+    const snap = historyRef.current.pop();
+    skipNextHistoryRef.current = true;
+    setKlasser(snap.klasser);
+    setAktivKlasseId(snap.aktivKlasseId);
+    setMig(snap.mig);
+    setPendingNavne(snap.pendingNavne);
+    setPendingKlasser(snap.pendingKlasser);
+    setCanUndo(historyRef.current.length > 0);
+  }, []);
+
+  // Keyboard: Cmd+Z (Mac) / Ctrl+Z (Windows) — fortryd. Skipper i tekst-felter
+  // så browseren kan håndtere tegn-niveau undo mens man skriver.
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === "z") {
+        const tag = e.target && e.target.tagName;
+        const isTypingField =
+          (tag === "INPUT" && e.target.type !== "checkbox" && e.target.type !== "button") ||
+          tag === "TEXTAREA" ||
+          (e.target && e.target.isContentEditable);
+        if (isTypingField) return;
+        e.preventDefault();
+        undo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [undo]);
 
   const tilfoejFag = () => {
     const fagId = nytId();
@@ -1357,7 +1434,8 @@ export default function Fagfordeling() {
         .laerer-row { transition: background 0.15s ease; }
         .laerer-row:hover { background: rgba(0,0,0,0.02); }
         .header-btn { transition: all 0.15s ease; }
-        .header-btn:hover { background: #1a1a1a; color: #f5f1ea; }
+        .header-btn:hover:not(:disabled) { background: #1a1a1a; color: #f5f1ea; }
+        .header-btn:disabled { background: transparent !important; }
         .add-fag-btn { transition: all 0.2s ease; }
         .add-fag-btn:hover { background: #1a1a1a; color: #f5f1ea; transform: translateY(-1px); }
         input[type=number]::-webkit-inner-spin-button,
@@ -1789,6 +1867,24 @@ export default function Fagfordeling() {
                   </>
                 )}
               </div>
+              <button
+                onClick={undo}
+                disabled={!canUndo}
+                className="header-btn header-io-btn"
+                aria-label="Fortryd seneste ændring"
+                title={canUndo ? "Fortryd (Cmd/Ctrl+Z)" : "Intet at fortryde"}
+                style={{
+                  display: "flex", alignItems: "center", gap: "6px",
+                  padding: "8px 10px", fontSize: "13px",
+                  background: "transparent", border: "1px solid #cdc5b8",
+                  color: canUndo ? "#7a7367" : "#cdc5b8",
+                  borderRadius: "0",
+                  cursor: canUndo ? "pointer" : "not-allowed",
+                  opacity: canUndo ? 1 : 0.6,
+                }}
+              >
+                <Undo2 size={14} />
+              </button>
               <button
                 onClick={nulstilAlt}
                 className="header-btn header-io-btn"
