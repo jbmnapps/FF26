@@ -4,6 +4,13 @@ import { DndContext, DragOverlay, closestCorners, pointerWithin, rectIntersectio
 import { SortableContext, useSortable, rectSortingStrategy, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
+// ID-generator: garanterer unikke id'er selv ved hurtige successive kald
+// (Date.now() alene kollidere når to opretter sker i samme millisekund).
+let _idCounter = 0;
+function nytId() {
+  return Date.now() * 1000 + (++_idCounter % 1000);
+}
+
 const STANDARD_FAG = [
   "Dansk", "Matematik", "Engelsk", "Tysk", "Fransk",
   "Historie", "Samfundsfag", "Kristendom", "Idræt",
@@ -375,6 +382,21 @@ export default function Fagfordeling() {
   const [omdoebNavn, setOmdoebNavn] = useState("");
   // EXPORT-MENU: dropdown med valg mellem JSON-fil og PDF (browser-print)
   const [eksportMenuAaben, setEksportMenuAaben] = useState(false);
+
+  // MIN-OVERSIGT: standalone log over egne timer (uafhængig af klasser).
+  // visning skifter mellem "klasse" (det normale view) og "min" (lærer-perspektivet).
+  // mig holder navn, mål-lektioner og en fritekst-liste af fag på tværs af klasser.
+  const [mig, setMig] = useState({ navn: "", maalLektioner: null, fag: [] });
+  const [visning, setVisning] = useState("klasse");
+  // Empty-state-flow for Min oversigt (0 = ikke i flow, 1 = navn-trin, 2 = mål-trin).
+  // Default 0 så forme ikke trigger på load — kun via eksplicit brugerhandling
+  // (klik på "Min oversigt" i hamburger-menuen, og kun hvis mig er tom).
+  const [migEmptyTrin, setMigEmptyTrin] = useState(0);
+  const [migNavnInput, setMigNavnInput] = useState("");
+  const [migMaalInput, setMigMaalInput] = useState("");
+  // Inline-edit af navn og mål i headeren
+  const [redigerMigNavn, setRedigerMigNavn] = useState(false);
+  const [redigerMigMaal, setRedigerMigMaal] = useState(false);
   // Pending lærer-navne: tilføjet via sidebar-knappen, men endnu ikke placeret
   // på et fag. Vises i sidebaren med total=0 så de kan trækkes til fag.
   const [pendingNavne, setPendingNavne] = useState([]);
@@ -413,7 +435,7 @@ export default function Fagfordeling() {
           setAktivKlasseId(aktivId);
         } else if (data.fag) {
           // Gammel shape — wrap som første klasse
-          const id = Date.now();
+          const id = nytId();
           const migreredeFag = (data.fag || []).map(f => ({
             ...f,
             forventedeLaerere: f.forventedeLaerere ?? 2,
@@ -423,19 +445,30 @@ export default function Fagfordeling() {
           setAktivKlasseId(id);
         } else {
           // Korrupt eller tom data — opret default klasse
-          const id = Date.now();
+          const id = nytId();
           setKlasser([{ id, navn: "Min klasse", fag: [] }]);
           setAktivKlasseId(id);
         }
+        // MIN-OVERSIGT: load mig + visning hvis de findes (defaults ellers)
+        if (data.mig && typeof data.mig === "object") {
+          setMig({
+            navn: data.mig.navn || "",
+            maalLektioner: data.mig.maalLektioner ?? null,
+            fag: Array.isArray(data.mig.fag) ? data.mig.fag : [],
+          });
+        }
+        if (data.visning === "min" || data.visning === "klasse") {
+          setVisning(data.visning);
+        }
       } else {
         // Første gang — opret default klasse
-        const id = Date.now();
+        const id = nytId();
         setKlasser([{ id, navn: "Min klasse", fag: [] }]);
         setAktivKlasseId(id);
       }
     } catch (e) {
       // Korrupt data — opret default klasse
-      const id = Date.now();
+      const id = nytId();
       setKlasser([{ id, navn: "Min klasse", fag: [] }]);
       setAktivKlasseId(id);
     }
@@ -448,27 +481,27 @@ export default function Fagfordeling() {
     try {
       localStorage.setItem(
         "fagfordeling-data",
-        JSON.stringify({ version: 2, klasser, aktivKlasseId })
+        JSON.stringify({ version: 2, klasser, aktivKlasseId, mig, visning })
       );
     } catch (e) {
       console.error("Kunne ikke gemme:", e);
     }
-  }, [klasser, aktivKlasseId, loaded]);
+  }, [klasser, aktivKlasseId, mig, visning, loaded]);
 
   const tilfoejFag = () => {
-    const nytId = Date.now();
+    const fagId = nytId();
     setFag([
       ...fag,
       {
-        id: nytId,
+        id: fagId,
         navn: "",
         lektioner: 1,
         forventedeLaerere: 2,
-        laerere: [{ id: nytId + 1, navn: "", lektioner: 1 }],
+        laerere: [{ id: nytId(), navn: "", lektioner: 1 }],
       },
     ]);
     // Fold automatisk ud
-    setUdfoldede(new Set([...udfoldede, nytId]));
+    setUdfoldede(new Set([...udfoldede, fagId]));
   };
 
   // Indlæser fagrække for et givent klassetrin med valgt antal lærere som
@@ -478,7 +511,7 @@ export default function Fagfordeling() {
     const skabelon = FAGRAEKKE_TEMPLATES[klassetrin];
     if (!skabelon) return;
     const antal = Math.max(1, Math.min(3, antalLaerere || 2));
-    const baseId = Date.now();
+    const baseId = nytId();
     const nyeFag = skabelon.map((s, i) => {
       const fagId = baseId + i * 10;
       const laerere = Array.from({ length: antal }).map((_, j) => ({
@@ -563,7 +596,7 @@ export default function Fagfordeling() {
               ...f,
               laerere: [
                 ...f.laerere,
-                { id: Date.now(), navn: "", lektioner: parseInt(f.lektioner) || 1 },
+                { id: nytId(), navn: "", lektioner: parseInt(f.lektioner) || 1 },
               ],
             }
           : f
@@ -737,9 +770,10 @@ export default function Fagfordeling() {
   }, 0);
 
   // Eksport / import
-  // MULTI-CLASS: JSON-eksport tager hele klasse-arrayet, så man kan dele alt på én gang.
+  // MULTI-CLASS: JSON-eksport tager hele state-objektet med (klasser + mig), så man
+  // kan dele alt på én gang.
   const eksportSomJSON = () => {
-    const data = JSON.stringify({ version: 2, klasser, aktivKlasseId }, null, 2);
+    const data = JSON.stringify({ version: 2, klasser, aktivKlasseId, mig, visning }, null, 2);
     const blob = new Blob([data], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -777,7 +811,7 @@ export default function Fagfordeling() {
           : migreredeKlasser[0].id;
         setAktivKlasseId(aktivId);
       } else if (data.fag) {
-        const id = Date.now();
+        const id = nytId();
         const migreredeFag = data.fag.map(f => ({
           ...f,
           forventedeLaerere: f.forventedeLaerere ?? 2,
@@ -788,6 +822,17 @@ export default function Fagfordeling() {
         setImportFejl("Filen ser ikke ud til at være en fagfordeling.");
         return;
       }
+      // MIN-OVERSIGT: importer mig + visning hvis de findes
+      if (data.mig && typeof data.mig === "object") {
+        setMig({
+          navn: data.mig.navn || "",
+          maalLektioner: data.mig.maalLektioner ?? null,
+          fag: Array.isArray(data.mig.fag) ? data.mig.fag : [],
+        });
+      }
+      if (data.visning === "min" || data.visning === "klasse") {
+        setVisning(data.visning);
+      }
       setShowImport(false);
       setImportFejl("");
     } catch (e) {
@@ -795,13 +840,31 @@ export default function Fagfordeling() {
     }
   };
 
-  // MULTI-CLASS: "Start forfra" nulstiller den AKTIVE klasse, ikke alle klasser.
-  // Det er den naturlige læsning når man kan have flere klasser.
+  // MULTI-CLASS: "Nulstil"-knappen er kontekst-følsom.
+  // I klasse-visning: nulstiller den AKTIVE klasse (fag og lærere). Andre klasser påvirkes ikke.
+  // I min-visning: nulstiller Min oversigt (navn, mål, fag) og åbner empty-state-formen.
   const nulstilAlt = () => {
+    if (visning === "min") {
+      setBekraeftSlet({
+        titel: "Nulstil lærer-lektioner?",
+        tekst: "Slet dit navn, mål og alle dine fag. Klasser og deres data påvirkes ikke. Det kan ikke fortrydes.",
+        bekraeftTekst: "Nulstil",
+        onConfirm: () => {
+          setMig({ navn: "", maalLektioner: null, fag: [] });
+          setMigEmptyTrin(1);
+          setMigNavnInput("");
+          setMigMaalInput("");
+          setRedigerMigNavn(false);
+          setRedigerMigMaal(false);
+          setBekraeftSlet(null);
+        },
+      });
+      return;
+    }
     setBekraeftSlet({
-      titel: "Start forfra på denne klasse?",
-      tekst: `Slet alt indhold i "${klasseNavn}" (fag og lærere) og start fra bunden? Det kan ikke fortrydes. Andre klasser påvirkes ikke.`,
-      bekraeftTekst: "Start forfra",
+      titel: "Nulstil denne klasse?",
+      tekst: `Slet alt indhold i "${klasseNavn}" (fag og lærere). Andre klasser påvirkes ikke. Det kan ikke fortrydes.`,
+      bekraeftTekst: "Nulstil",
       onConfirm: () => {
         setKlasseNavn("Min klasse");
         setFag([]);
@@ -817,7 +880,7 @@ export default function Fagfordeling() {
 
   // MULTI-CLASS: operationer på klasse-arrayet
   const tilfoejKlasse = () => {
-    const id = Date.now();
+    const id = nytId();
     const nyKlasse = { id, navn: "Ny klasse", fag: [] };
     setKlasser(prev => [...prev, nyKlasse]);
     setAktivKlasseId(id);
@@ -830,7 +893,9 @@ export default function Fagfordeling() {
   };
 
   const skiftAktivKlasse = (id) => {
-    if (id === aktivKlasseId) {
+    // MIN-OVERSIGT: skift også visning tilbage til klasse hvis vi er i min oversigt
+    setVisning("klasse");
+    if (id === aktivKlasseId && visning === "klasse") {
       setMenuAaben(false);
       return;
     }
@@ -865,6 +930,76 @@ export default function Fagfordeling() {
     setOmdoeberKlasseId(null);
     setOmdoebNavn("");
   };
+
+  // MIN-OVERSIGT: operationer
+  const startMinOversigt = (navn, maal) => {
+    setMig({ navn: navn.trim(), maalLektioner: parseInt(maal) || null, fag: [{ id: nytId(), navn: "", klasse: "", lektioner: 1 }] });
+    setMigEmptyTrin(0);
+    setMigNavnInput("");
+    setMigMaalInput("");
+  };
+
+  const tilfoejMigFag = () => {
+    setMig(prev => ({
+      ...prev,
+      fag: [...prev.fag, { id: nytId(), navn: "", klasse: "", lektioner: 1 }],
+    }));
+  };
+
+  const opdaterMigFag = (id, felt, vaerdi) => {
+    setMig(prev => ({
+      ...prev,
+      fag: prev.fag.map(f => f.id === id ? { ...f, [felt]: vaerdi } : f),
+    }));
+  };
+
+  const sletMigFag = (id) => {
+    const fag = mig.fag.find(f => f.id === id);
+    const tomt = fag && !fag.navn.trim() && !fag.klasse.trim();
+    if (tomt) {
+      setMig(prev => ({ ...prev, fag: prev.fag.filter(f => f.id !== id) }));
+      return;
+    }
+    setBekraeftSlet({
+      titel: "Slet fag fra din oversigt?",
+      tekst: `"${fag?.navn || "Uden navn"}" i ${fag?.klasse || "ingen klasse"} fjernes fra din oversigt.`,
+      bekraeftTekst: "Slet",
+      onConfirm: () => {
+        setMig(prev => ({ ...prev, fag: prev.fag.filter(f => f.id !== id) }));
+        setBekraeftSlet(null);
+      },
+    });
+  };
+
+  const skiftTilMinOversigt = () => {
+    setVisning("min");
+    setMenuAaben(false);
+    // Hvis Min oversigt er tom (første gang), starter vi 2-trins flowet
+    if (!mig.navn && mig.fag.length === 0) {
+      setMigEmptyTrin(1);
+      setMigNavnInput("");
+      setMigMaalInput("");
+    } else {
+      setMigEmptyTrin(0);
+    }
+  };
+
+  // MIN-OVERSIGT: derived data
+  const migOversigt = (() => {
+    const map = {};
+    mig.fag.forEach(f => {
+      const klasse = (f.klasse || "").trim();
+      if (!klasse) return;
+      if (!map[klasse]) map[klasse] = { klasse, total: 0, fag: [] };
+      const lekt = parseInt(f.lektioner) || 0;
+      map[klasse].total += lekt;
+      map[klasse].fag.push({ navn: f.navn || "Uden navn", lektioner: lekt });
+    });
+    return Object.values(map).sort((a, b) => b.total - a.total);
+  })();
+  const migSamletLektioner = mig.fag.reduce((s, f) => s + (parseInt(f.lektioner) || 0), 0);
+  const migAntalKlasser = migOversigt.length;
+  const migMangler = mig.maalLektioner !== null ? mig.maalLektioner - migSamletLektioner : null;
 
   const sletKlasse = (k) => {
     if (klasser.length <= 1) return; // mindst én klasse skal eksistere
@@ -1045,7 +1180,7 @@ export default function Fagfordeling() {
         const fagLekt = parseInt(f.lektioner) || 0;
         return {
           ...f,
-          laerere: [...f.laerere, { id: Date.now(), navn: sidebarNavn, lektioner: fagLekt }],
+          laerere: [...f.laerere, { id: nytId(), navn: sidebarNavn, lektioner: fagLekt }],
         };
       }));
       // Fjern fra pendingNavne — læreren er nu på et rigtigt fag
@@ -1338,7 +1473,8 @@ export default function Fagfordeling() {
             display: "flex", justifyContent: "space-between",
             alignItems: "center", gap: "16px",
           }}>
-            <input
+            {visning === "klasse" ? (
+              <input
                 className="klasse-titel"
                 type="text"
                 value={klasseNavn}
@@ -1359,6 +1495,86 @@ export default function Fagfordeling() {
                   flex: "0 1 auto",
                 }}
               />
+            ) : migEmptyTrin > 0 ? (
+              /* Empty-state-flow viser sin egen titel — header er stille */
+              <div style={{ flex: "0 1 auto" }} />
+            ) : (
+              /* MIN-OVERSIGT: header viser navn + lille mål-undertekst */
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px", flex: "0 1 auto", minWidth: 0 }}>
+                {redigerMigNavn ? (
+                  <input
+                    autoFocus
+                    type="text"
+                    value={mig.navn}
+                    onChange={(e) => setMig(prev => ({ ...prev, navn: e.target.value }))}
+                    onBlur={() => setRedigerMigNavn(false)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setRedigerMigNavn(false); }}
+                    className="klasse-titel"
+                    style={{
+                      fontFamily: "'Fraunces', Georgia, serif",
+                      fontSize: "44px", fontWeight: 600,
+                      letterSpacing: "-0.02em", color: "#1a1a1a",
+                      background: "transparent",
+                      border: "none", borderBottom: "1px solid #1a1a1a",
+                      padding: "0", lineHeight: 1,
+                      outline: "none", fieldSizing: "content",
+                      minWidth: "60px", maxWidth: "100%",
+                    }}
+                  />
+                ) : (
+                  <button
+                    onClick={() => setRedigerMigNavn(true)}
+                    className="klasse-titel"
+                    style={{
+                      fontFamily: "'Fraunces', Georgia, serif",
+                      fontSize: "44px", fontWeight: 600,
+                      letterSpacing: "-0.02em", color: "#1a1a1a",
+                      background: "transparent", border: "none",
+                      padding: 0, cursor: "text", textAlign: "left",
+                      lineHeight: 1,
+                    }}
+                    title="Klik for at redigere navn"
+                  >
+                    {mig.navn || "Min oversigt"}
+                  </button>
+                )}
+                {redigerMigMaal ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span style={{ fontSize: "13px", color: "#7a7367" }}>Mål:</span>
+                    <input
+                      autoFocus
+                      type="number" min="1" max="40"
+                      value={mig.maalLektioner ?? ""}
+                      onChange={(e) => setMig(prev => ({ ...prev, maalLektioner: parseInt(e.target.value) || null }))}
+                      onBlur={() => setRedigerMigMaal(false)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setRedigerMigMaal(false); }}
+                      style={{
+                        fontSize: "13px", color: "#1a1a1a",
+                        background: "transparent",
+                        border: "none", borderBottom: "1px solid #1a1a1a",
+                        padding: "1px 4px", outline: "none",
+                        width: "50px", fontVariantNumeric: "tabular-nums",
+                      }}
+                    />
+                    <span style={{ fontSize: "13px", color: "#7a7367" }}>lektioner</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setRedigerMigMaal(true)}
+                    style={{
+                      fontSize: "13px", color: "#7a7367",
+                      background: "transparent", border: "none",
+                      padding: 0, cursor: "pointer", textAlign: "left",
+                      display: "flex", alignItems: "center", gap: "6px",
+                    }}
+                    title="Klik for at redigere mål"
+                  >
+                    Mål: {mig.maalLektioner ? `${mig.maalLektioner} lektioner` : "ikke sat"}
+                    <Pencil size={11} strokeWidth={1.75} style={{ opacity: 0.5 }} />
+                  </button>
+                )}
+              </div>
+            )}
             <div style={{
               display: "flex", gap: "8px",
               flexShrink: 0,
@@ -1477,8 +1693,8 @@ export default function Fagfordeling() {
               <button
                 onClick={nulstilAlt}
                 className="header-btn header-io-btn"
-                aria-label="Start forfra"
-                title="Start forfra — slet alt"
+                aria-label={visning === "min" ? "Nulstil lærer-lektioner" : "Nulstil denne klasse"}
+                title={visning === "min" ? "Nulstil lærer-lektioner" : "Nulstil denne klasse"}
                 style={{
                   display: "flex", alignItems: "center", gap: "6px",
                   padding: "8px 10px", fontSize: "13px",
@@ -1493,7 +1709,7 @@ export default function Fagfordeling() {
         </header>
 
         {/* === MOBIL-LAYOUT === */}
-        {isMobile && (
+        {isMobile && visning === "klasse" && (
           <div style={{ margin: "0 -16px" }}>
             <MobileSummaryBar oversigt={oversigt} fag={fag} fagStatus={fagStatus} />
             <MobileTabs
@@ -1616,7 +1832,7 @@ export default function Fagfordeling() {
         )}
 
         {/* === DESKTOP-LAYOUT === */}
-        {!isMobile && (
+        {!isMobile && visning === "klasse" && (
           <>
         {/* Mobil: kompakt stat-linje */}
         <StatLine
@@ -1973,6 +2189,251 @@ export default function Fagfordeling() {
         </DndContext>
           </>
         )}
+
+        {/* === MIN OVERSIGT === */}
+        {visning === "min" && migEmptyTrin > 0 && (
+          /* Empty state — 2-trins flow: navn → mål */
+          <div style={{
+            maxWidth: "520px", margin: "60px auto 0",
+            padding: "40px 32px",
+            background: "#fff", border: "1px solid #e0d9ca",
+          }}>
+            <div style={{ textAlign: "center", marginBottom: "24px" }}>
+              <Users size={28} style={{ marginBottom: "10px", opacity: 0.4, color: "#7a7367" }} />
+              <div style={{
+                fontFamily: "'Fraunces', Georgia, serif",
+                fontSize: "22px", fontWeight: 500, color: "#1a1a1a",
+                marginBottom: "6px",
+              }}>
+                {migEmptyTrin === 1 ? "Skriv dit navn" : "Hvor mange lektioner skal du have?"}
+              </div>
+              <div style={{ fontSize: "13px", color: "#7a7367", lineHeight: 1.5 }}>
+                {migEmptyTrin === 1
+                  ? "Det er navnet på din personlige oversigt. Du kan altid ændre det senere."
+                  : "Bruges til at vise hvor mange lektioner du mangler. Kan altid ændres."}
+              </div>
+            </div>
+            {migEmptyTrin === 1 ? (
+              <input
+                autoFocus
+                type="text"
+                value={migNavnInput}
+                onChange={(e) => setMigNavnInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && migNavnInput.trim()) setMigEmptyTrin(2);
+                }}
+                placeholder="fx Jonas"
+                style={{
+                  width: "100%", padding: "12px 14px",
+                  fontSize: "16px", color: "#1a1a1a",
+                  background: "#fff", border: "1px solid #1a1a1a",
+                  outline: "none",
+                  marginBottom: "16px",
+                  boxSizing: "border-box",
+                }}
+              />
+            ) : (
+              <input
+                autoFocus
+                type="number" min="1" max="40"
+                value={migMaalInput}
+                onChange={(e) => setMigMaalInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && parseInt(migMaalInput) > 0) {
+                    startMinOversigt(migNavnInput, migMaalInput);
+                  }
+                }}
+                placeholder="fx 26"
+                style={{
+                  width: "100%", padding: "12px 14px",
+                  fontSize: "16px", color: "#1a1a1a",
+                  background: "#fff", border: "1px solid #1a1a1a",
+                  outline: "none",
+                  marginBottom: "16px",
+                  boxSizing: "border-box",
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              />
+            )}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              {migEmptyTrin === 2 ? (
+                <button
+                  onClick={() => setMigEmptyTrin(1)}
+                  style={{
+                    background: "transparent", border: "none",
+                    color: "#5a5448", cursor: "pointer",
+                    fontSize: "12px", textDecoration: "underline",
+                    padding: 0,
+                  }}
+                >
+                  ← tilbage
+                </button>
+              ) : <span />}
+              <button
+                onClick={() => {
+                  if (migEmptyTrin === 1) {
+                    if (migNavnInput.trim()) setMigEmptyTrin(2);
+                  } else {
+                    if (parseInt(migMaalInput) > 0) startMinOversigt(migNavnInput, migMaalInput);
+                  }
+                }}
+                disabled={migEmptyTrin === 1 ? !migNavnInput.trim() : !(parseInt(migMaalInput) > 0)}
+                style={{
+                  padding: "10px 20px",
+                  fontFamily: "'Fraunces', Georgia, serif",
+                  fontSize: "15px", fontWeight: 500,
+                  background: "#1a1a1a", color: "#f5f1ea",
+                  border: "1px solid #1a1a1a",
+                  cursor: "pointer",
+                  opacity: (migEmptyTrin === 1 ? !migNavnInput.trim() : !(parseInt(migMaalInput) > 0)) ? 0.4 : 1,
+                }}
+              >
+                {migEmptyTrin === 1 ? "Næste →" : "Færdig"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {visning === "min" && migEmptyTrin === 0 && (
+          <>
+            {/* Status-bar */}
+            <div className="stat-bar" style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: "1px", background: "#1a1a1a", border: "1px solid #1a1a1a",
+              marginBottom: "24px",
+            }}>
+              <StatBox label="Klasser" value={migAntalKlasser} sub={migAntalKlasser === 1 ? "klasse" : "klasser"} />
+              <StatBox label="Lektioner" value={migSamletLektioner} sub="i alt" />
+              <MinManglerBox mangler={migMangler} maal={mig.maalLektioner} antalFag={mig.fag.length} />
+            </div>
+
+            <div className="main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 264px", gap: "16px", alignItems: "start" }}>
+              {/* Venstre: dine fag */}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "10px" }}>
+                  <h2 style={{
+                    fontFamily: "'Fraunces', Georgia, serif", fontSize: "20px",
+                    fontWeight: 600, color: "#1a1a1a", margin: 0,
+                  }}>
+                    Mine fag
+                  </h2>
+                  <span style={{ fontSize: "12px", color: "#7a7367", fontWeight: 500 }}>
+                    {mig.fag.length} {mig.fag.length === 1 ? "fag" : "fag"}
+                  </span>
+                </div>
+
+                <div className="fag-grid" style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+                  gap: "14px",
+                }}>
+                  {mig.fag.map((f) => (
+                    <MinFagCard
+                      key={f.id}
+                      f={f}
+                      opdater={(felt, vaerdi) => opdaterMigFag(f.id, felt, vaerdi)}
+                      slet={() => sletMigFag(f.id)}
+                    />
+                  ))}
+                </div>
+
+                <button
+                  onClick={tilfoejMigFag}
+                  className="add-fag-btn"
+                  data-no-print="true"
+                  style={{
+                    marginTop: "16px", width: "100%", padding: "14px",
+                    fontSize: "14px", fontWeight: 500, color: "#1a1a1a",
+                    background: "transparent", border: "1px dashed #1a1a1a",
+                    cursor: "pointer", display: "flex", alignItems: "center",
+                    justifyContent: "center", gap: "8px",
+                  }}
+                >
+                  <Plus size={16} /> Tilføj fag
+                </button>
+              </div>
+
+              {/* Højre: klasser */}
+              <aside className="laerere-aside" style={{ position: "sticky", top: "24px" }}>
+                <div style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                  padding: "0 14px", marginBottom: "4px",
+                }}>
+                  <h2 style={{
+                    fontFamily: "'Fraunces', Georgia, serif", fontSize: "20px",
+                    fontWeight: 600, color: "#1a1a1a", margin: 0,
+                  }}>
+                    Klasser
+                  </h2>
+                  <span style={{ fontSize: "12px", color: "#7a7367", fontWeight: 500 }}>
+                    {migAntalKlasser} i alt
+                  </span>
+                </div>
+                {migOversigt.length === 0 ? (
+                  <div style={{
+                    padding: "16px 14px", fontSize: "13px",
+                    color: "#9a9387", fontStyle: "italic",
+                  }}>
+                    Tilføj fag med en klasse for at se oversigten her.
+                  </div>
+                ) : (
+                  <div>
+                    {migOversigt.map((k) => (
+                      <div key={k.klasse} className="laerer-item" style={{ padding: "10px 14px" }}>
+                        <div className="laerer-item-row" style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                          gap: "10px", marginBottom: "2px",
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: 1 }}>
+                            <div
+                              className="laerer-avatar"
+                              style={{
+                                width: "24px", height: "24px", borderRadius: "50%",
+                                background: farveForNavn(k.klasse), color: "#fff",
+                                fontSize: "11px", fontWeight: 600,
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                flexShrink: 0,
+                                letterSpacing: "-0.02em",
+                              }}
+                            >
+                              {klasseAvatarTekst(k.klasse)}
+                            </div>
+                            <span className="laerer-navn" style={{
+                              fontFamily: "'Fraunces', Georgia, serif",
+                              fontSize: "15px", fontWeight: 500, color: "#1a1a1a",
+                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                            }}>
+                              {k.klasse}
+                            </span>
+                          </div>
+                          <span className="laerer-total" style={{
+                            fontSize: "16px", fontWeight: 500, color: "#1a1a1a",
+                            fontVariantNumeric: "tabular-nums",
+                            flexShrink: 0,
+                          }}>
+                            {k.total}
+                          </span>
+                        </div>
+                        <div className="laerer-fag-tags" style={{
+                          fontSize: "11px", color: "#7a7367",
+                          display: "flex", flexWrap: "wrap", gap: "6px",
+                          paddingLeft: "34px",
+                        }}>
+                          {k.fag.map((f, i) => (
+                            <span key={i}>
+                              {fagForkortelse(f.navn)} {f.lektioner}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </aside>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Mobile bottom-sheet for fag-redigering */}
@@ -2241,6 +2702,51 @@ export default function Fagfordeling() {
             >
               <Plus size={15} strokeWidth={1.75} /> Tilføj klasse
             </button>
+
+            {/* MIN-OVERSIGT: separator + entry, samme stil som klasse-rækkerne */}
+            <div style={{
+              height: "1px", background: "#e0d9ca",
+              margin: "20px -24px 16px",
+            }} />
+            <div style={{
+              fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase",
+              color: "#9a9387", fontWeight: 500,
+              marginBottom: "10px", paddingLeft: "14px",
+            }}>
+              Personligt
+            </div>
+            <div
+              className={`klasse-menu-row${visning === "min" ? " aktiv" : ""}`}
+              style={{
+                position: "relative",
+                display: "flex", alignItems: "center",
+                padding: "10px 24px 10px 38px",
+                cursor: "pointer",
+                gap: "8px",
+                minHeight: "44px",
+                margin: "0 -24px",
+              }}
+              onClick={skiftTilMinOversigt}
+            >
+              <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "baseline", gap: "10px" }}>
+                <span className="klasse-menu-navn" style={{
+                  fontFamily: "'Fraunces', Georgia, serif",
+                  fontSize: "16px", fontWeight: 500,
+                  color: "#5a5448",
+                  transition: "color 0.12s",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  Min oversigt
+                </span>
+                <span style={{
+                  fontSize: "12px", color: "#9a9387",
+                  fontVariantNumeric: "tabular-nums",
+                  flexShrink: 0,
+                }}>
+                  {mig.fag.length === 0 ? "—" : mig.fag.length}
+                </span>
+              </div>
+            </div>
           </aside>
         </div>
       )}
@@ -2256,6 +2762,186 @@ export default function Fagfordeling() {
           farligt
         />
       )}
+    </div>
+  );
+}
+
+// MIN-OVERSIGT: stat-box til "Mangler" — viser mål-undertekst og håndterer over/under-states.
+function MinManglerBox({ mangler, maal, antalFag }) {
+  let label = "Mangler";
+  let hovedTal;
+  let undertekst;
+  let talFarve = "#1a1a1a";
+  if (maal === null || maal === undefined) {
+    label = "Mål";
+    hovedTal = "—";
+    undertekst = "Sæt et mål i headeren";
+    talFarve = "#9a9387";
+  } else if (antalFag === 0) {
+    hovedTal = maal;
+    undertekst = "Tilføj fag for at fordele";
+    talFarve = "#9a9387";
+  } else if (mangler > 0) {
+    hovedTal = mangler;
+    undertekst = mangler === 1 ? `1 lektion mangler · mål ${maal}` : `${mangler} lektioner mangler · mål ${maal}`;
+  } else if (mangler < 0) {
+    label = "Over";
+    hovedTal = -mangler;
+    undertekst = -mangler === 1 ? `1 over mål ${maal}` : `${-mangler} over mål ${maal}`;
+    talFarve = "#a07820";
+  } else {
+    hovedTal = 0;
+    undertekst = `Du har præcis ${maal}. Det går op.`;
+    talFarve = "#3d7a4e";
+  }
+  return (
+    <div style={{ background: "#f5f1ea", padding: "14px 20px" }}>
+      <div style={{
+        fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase",
+        color: "#7a7367", fontWeight: 500, marginBottom: "4px",
+      }}>
+        {label}
+      </div>
+      <div style={{
+        fontFamily: "'Fraunces', Georgia, serif", fontSize: "28px",
+        fontWeight: 600, color: talFarve, lineHeight: 1, marginBottom: "2px",
+      }}>
+        {hovedTal}
+      </div>
+      <div style={{ fontSize: "12px", color: "#7a7367" }}>{undertekst}</div>
+    </div>
+  );
+}
+
+// MIN-OVERSIGT: udleder en kort avatar-tekst fra klassenavn (fx "9.S" → "9S",
+// "8.A" → "8A"). Bevarer både cifre og bogstaver — meningsfuld initial.
+function klasseAvatarTekst(klasse) {
+  const renset = (klasse || "").replace(/[\s.]/g, "");
+  return renset.slice(0, 2).toUpperCase() || "?";
+}
+
+// MIN-OVERSIGT: normaliserer klasse-input så "8a", "8A", "8.a", "8.A", "8,A",
+// "8,a", "8 A" alle bliver til "8.A". Ikke-standard input (fx "Lille klasse",
+// "8.AB", eller bare et tal/bogstav alene) returneres uændret bortset fra trim.
+function normaliserKlasse(input) {
+  if (!input) return "";
+  const trimmed = input.trim();
+  if (!trimmed) return "";
+  // Match: tal-præfix + valgfri separator (mellemrum/punktum/komma) + ét bogstav
+  const match = trimmed.match(/^(\d+)\s*[.,]?\s*([a-zæøåA-ZÆØÅ])$/);
+  if (match) return `${match[1]}.${match[2].toUpperCase()}`;
+  return trimmed;
+}
+
+// MIN-OVERSIGT: fag-kort der spejler klasse-visningens struktur — fag-navn +
+// lektioner i header, klasse-avatar + klasse-navn nedenunder (i stedet for lærere).
+function MinFagCard({ f, opdater, slet }) {
+  const [hover, setHover] = React.useState(false);
+  const harKlasse = !!(f.klasse && f.klasse.trim());
+  return (
+    <div
+      className="fag-card"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        background: "#fff", border: "1px solid #e0d9ca",
+        position: "relative",
+        display: "flex", flexDirection: "column",
+      }}
+    >
+      <button
+        onClick={slet}
+        aria-label="Slet fag"
+        data-no-print="true"
+        style={{
+          position: "absolute", top: "8px", right: "8px",
+          background: "transparent", border: "none",
+          color: "#9a9387", cursor: "pointer", padding: "4px",
+          opacity: hover ? 1 : 0, transition: "opacity 0.12s",
+          display: "flex", zIndex: 2,
+        }}
+      >
+        <Trash2 size={14} />
+      </button>
+      {/* Header: fag-navn + lektion-tal (samme grid som klasse-visningens fag-kort) */}
+      <div className="fag-card-header" style={{
+        padding: "14px 14px 10px 14px",
+        display: "flex", alignItems: "baseline", gap: "8px",
+      }}>
+        <input
+          type="text"
+          value={f.navn}
+          onChange={(e) => opdater("navn", e.target.value)}
+          placeholder="Fag"
+          className="fag-card-fagnavn"
+          style={{
+            flex: "1 1 auto", minWidth: 0,
+            fontFamily: "'Fraunces', Georgia, serif",
+            fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
+            background: "transparent", border: "none",
+            padding: 0, outline: "none", lineHeight: 1.2,
+          }}
+        />
+        <div style={{ display: "flex", alignItems: "baseline", gap: "4px", flexShrink: 0 }}>
+          <input
+            type="number" min="0" max="40"
+            value={f.lektioner}
+            onChange={(e) => opdater("lektioner", parseInt(e.target.value) || 0)}
+            className="fag-card-lekt-input"
+            style={{
+              fontFamily: "'Fraunces', Georgia, serif",
+              fontSize: "22px", fontWeight: 600, color: "#1a1a1a",
+              background: "transparent", border: "none",
+              padding: 0, outline: "none",
+              fontVariantNumeric: "tabular-nums",
+              width: "32px", textAlign: "right",
+            }}
+          />
+          <span className="fag-card-lekt-label" style={{
+            fontSize: "13px", color: "#7a7367",
+          }}>
+            lek
+          </span>
+        </div>
+      </div>
+      {/* Body: klasse-avatar + klasse-input (lærer-rolle) */}
+      <div className="fag-card-laerere" style={{
+        padding: "10px 14px 14px",
+        borderTop: "1px solid #f0ead9",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div
+            className="laerer-avatar"
+            style={{
+              width: "26px", height: "26px", borderRadius: "50%",
+              background: harKlasse ? farveForNavn(f.klasse) : "transparent",
+              color: "#fff",
+              fontSize: "10px", fontWeight: 600,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0,
+              border: harKlasse ? "none" : "1px dashed #cdc5b8",
+            }}
+          >
+            {harKlasse ? klasseAvatarTekst(f.klasse) : ""}
+          </div>
+          <input
+            type="text"
+            value={f.klasse}
+            onChange={(e) => opdater("klasse", e.target.value)}
+            onBlur={(e) => {
+              const normaliseret = normaliserKlasse(e.target.value);
+              if (normaliseret !== e.target.value) opdater("klasse", normaliseret);
+            }}
+            placeholder="Klasse"
+            style={{
+              flex: 1, minWidth: 0,
+              fontSize: "14px", color: "#1a1a1a",
+              background: "transparent", border: "none",
+              padding: 0, outline: "none",
+            }}
+          />
+        </div>
+      </div>
     </div>
   );
 }
