@@ -196,8 +196,8 @@ const FAG_FORKORTELSER = {
   "kristendomskundskab": "Kri",
   "musik": "Mus",
   "billedkunst": "BK",
-  "håndværk og design": "H&D",
-  "håndværk/design": "H&D",
+  "håndværk og design": "HDS",
+  "håndværk/design": "HDS",
   "håndværk": "Hå",
   "sløjd": "Slø",
   "håndarbejde": "Hå",
@@ -397,6 +397,13 @@ export default function Fagfordeling() {
   // Inline-edit af navn og mål i headeren
   const [redigerMigNavn, setRedigerMigNavn] = useState(false);
   const [redigerMigMaal, setRedigerMigMaal] = useState(false);
+  // Pending klasser i Min oversigt-sidebar — tilføjet via "+ Tilføj klasse"-flow
+  // men endnu ikke knyttet til et fag. Trækkes fra sidebar til fag-kort.
+  const [pendingKlasser, setPendingKlasser] = useState([]);
+  const [tilfoejKlasseAaben, setTilfoejKlasseAaben] = useState(false);
+  const [nyKlasseInput, setNyKlasseInput] = useState("");
+  // Active drag state til DragOverlay i min-visning
+  const [activeMinDrag, setActiveMinDrag] = useState(null);
   // Pending lærer-navne: tilføjet via sidebar-knappen, men endnu ikke placeret
   // på et fag. Vises i sidebaren med total=0 så de kan trækkes til fag.
   const [pendingNavne, setPendingNavne] = useState([]);
@@ -982,6 +989,54 @@ export default function Fagfordeling() {
     } else {
       setMigEmptyTrin(0);
     }
+  };
+
+  // MIN-OVERSIGT: drag handlers
+  // Active.id konventioner:
+  //   - number: et fag.id (drag for reorder)
+  //   - string "klasse:<navn>": en klasse fra sidebar (drag til fag-kort for at sætte klasse)
+  const handleMinDragStart = (e) => {
+    setActiveMinDrag(e.active.id);
+  };
+  const handleMinDragEnd = (e) => {
+    const { active, over } = e;
+    setActiveMinDrag(null);
+    if (!over) return;
+
+    // Klasse fra sidebar droppes på et fag-kort → sæt fag.klasse
+    if (typeof active.id === "string" && active.id.startsWith("klasse:") && typeof over.id === "number") {
+      const klasse = active.id.slice("klasse:".length);
+      setMig(prev => ({
+        ...prev,
+        fag: prev.fag.map(f => f.id === over.id ? { ...f, klasse } : f),
+      }));
+      setPendingKlasser(prev => prev.filter(k => k !== klasse));
+      return;
+    }
+
+    // Fag-kort reorder
+    if (typeof active.id === "number" && typeof over.id === "number") {
+      if (active.id === over.id) return;
+      setMig(prev => {
+        const oldIdx = prev.fag.findIndex(f => f.id === active.id);
+        const newIdx = prev.fag.findIndex(f => f.id === over.id);
+        if (oldIdx < 0 || newIdx < 0) return prev;
+        return { ...prev, fag: arrayMove(prev.fag, oldIdx, newIdx) };
+      });
+    }
+  };
+
+  // Tilføj en pending klasse fra sidebar-input. Normaliseres ("8a" → "8.A").
+  // Skipper tomme og dubletter (allerede i pending eller allerede brugt på et fag).
+  const tilfoejPendingKlasse = () => {
+    const normaliseret = normaliserKlasse(nyKlasseInput);
+    if (!normaliseret) return;
+    const allerede = pendingKlasser.includes(normaliseret) ||
+      mig.fag.some(f => normaliserKlasse(f.klasse) === normaliseret);
+    if (!allerede) {
+      setPendingKlasser(prev => [...prev, normaliseret]);
+    }
+    setNyKlasseInput("");
   };
 
   // MIN-OVERSIGT: derived data
@@ -2308,130 +2363,176 @@ export default function Fagfordeling() {
               <MinManglerBox mangler={migMangler} maal={mig.maalLektioner} antalFag={mig.fag.length} />
             </div>
 
-            <div className="main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 264px", gap: "16px", alignItems: "start" }}>
-              {/* Venstre: dine fag */}
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "10px" }}>
-                  <h2 style={{
-                    fontFamily: "'Fraunces', Georgia, serif", fontSize: "20px",
-                    fontWeight: 600, color: "#1a1a1a", margin: 0,
-                  }}>
-                    Mine fag
-                  </h2>
-                  <span style={{ fontSize: "12px", color: "#7a7367", fontWeight: 500 }}>
-                    {mig.fag.length} {mig.fag.length === 1 ? "fag" : "fag"}
-                  </span>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCorners}
+              measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+              onDragStart={handleMinDragStart}
+              onDragEnd={handleMinDragEnd}
+            >
+              <div className="main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 264px", gap: "16px", alignItems: "start" }}>
+                {/* Venstre: dine fag */}
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "10px" }}>
+                    <h2 style={{
+                      fontFamily: "'Fraunces', Georgia, serif", fontSize: "20px",
+                      fontWeight: 600, color: "#1a1a1a", margin: 0,
+                    }}>
+                      Mine fag
+                    </h2>
+                    <span style={{ fontSize: "12px", color: "#7a7367", fontWeight: 500 }}>
+                      {mig.fag.length} fag
+                    </span>
+                  </div>
+                  <SortableContext items={mig.fag.map(f => f.id)} strategy={rectSortingStrategy}>
+                    <div className="fag-grid" style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+                      gap: "14px",
+                      alignItems: "start",
+                    }}>
+                      {mig.fag.map((f) => (
+                        <MinFagCard
+                          key={f.id}
+                          f={f}
+                          opdater={(felt, vaerdi) => opdaterMigFag(f.id, felt, vaerdi)}
+                          slet={() => sletMigFag(f.id)}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                  <button
+                    onClick={tilfoejMigFag}
+                    className="add-fag-btn"
+                    data-no-print="true"
+                    style={{
+                      marginTop: "16px", width: "100%", padding: "14px",
+                      fontSize: "14px", fontWeight: 500, color: "#1a1a1a",
+                      background: "transparent", border: "1px dashed #1a1a1a",
+                      cursor: "pointer", display: "flex", alignItems: "center",
+                      justifyContent: "center", gap: "8px",
+                    }}
+                  >
+                    <Plus size={16} /> Tilføj fag
+                  </button>
                 </div>
 
-                <div className="fag-grid" style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-                  gap: "14px",
-                }}>
-                  {mig.fag.map((f) => (
-                    <MinFagCard
-                      key={f.id}
-                      f={f}
-                      opdater={(felt, vaerdi) => opdaterMigFag(f.id, felt, vaerdi)}
-                      slet={() => sletMigFag(f.id)}
+                {/* Højre: klasser (draggable rows + tilføj klasse-flow) */}
+                <aside className="laerere-aside" style={{ position: "sticky", top: "24px" }}>
+                  <div style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                    padding: "0 14px", marginBottom: "4px",
+                  }}>
+                    <h2 style={{
+                      fontFamily: "'Fraunces', Georgia, serif", fontSize: "20px",
+                      fontWeight: 600, color: "#1a1a1a", margin: 0,
+                    }}>
+                      Klasser
+                    </h2>
+                    <span style={{ fontSize: "12px", color: "#7a7367", fontWeight: 500 }}>
+                      {migAntalKlasser + pendingKlasser.length} i alt
+                    </span>
+                  </div>
+                  {(migOversigt.length === 0 && pendingKlasser.length === 0) && (
+                    <div style={{
+                      padding: "16px 14px", fontSize: "13px",
+                      color: "#9a9387", fontStyle: "italic",
+                    }}>
+                      Tilføj klasser herunder eller skriv direkte i et fag-kort.
+                    </div>
+                  )}
+                  {migOversigt.map((k) => (
+                    <SidebarKlasseRow
+                      key={k.klasse}
+                      klasse={k.klasse}
+                      total={k.total}
+                      fag={k.fag}
                     />
                   ))}
-                </div>
-
-                <button
-                  onClick={tilfoejMigFag}
-                  className="add-fag-btn"
-                  data-no-print="true"
-                  style={{
-                    marginTop: "16px", width: "100%", padding: "14px",
-                    fontSize: "14px", fontWeight: 500, color: "#1a1a1a",
-                    background: "transparent", border: "1px dashed #1a1a1a",
-                    cursor: "pointer", display: "flex", alignItems: "center",
-                    justifyContent: "center", gap: "8px",
-                  }}
-                >
-                  <Plus size={16} /> Tilføj fag
-                </button>
+                  {pendingKlasser.map((klasse) => (
+                    <SidebarKlasseRow
+                      key={`pending:${klasse}`}
+                      klasse={klasse}
+                      total={0}
+                      fag={[]}
+                      pending
+                    />
+                  ))}
+                  <div data-no-print="true" style={{ padding: "12px 14px 0" }}>
+                    {tilfoejKlasseAaben ? (
+                      <input
+                        autoFocus
+                        type="text"
+                        value={nyKlasseInput}
+                        onChange={(e) => setNyKlasseInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") tilfoejPendingKlasse();
+                          if (e.key === "Escape") {
+                            setTilfoejKlasseAaben(false);
+                            setNyKlasseInput("");
+                          }
+                        }}
+                        onBlur={() => {
+                          if (nyKlasseInput.trim()) tilfoejPendingKlasse();
+                          setTilfoejKlasseAaben(false);
+                        }}
+                        placeholder="fx 9.S"
+                        className="add-laerer-btn"
+                        style={{
+                          width: "100%", padding: "8px 10px",
+                          fontSize: "13px", color: "#1a1a1a",
+                          background: "#fff", border: "1px solid #1a1a1a",
+                          outline: "none", boxSizing: "border-box",
+                        }}
+                      />
+                    ) : (
+                      <button
+                        onClick={() => setTilfoejKlasseAaben(true)}
+                        className="add-laerer-btn"
+                        style={{
+                          width: "100%", padding: "8px 10px",
+                          fontSize: "13px", fontWeight: 500, color: "#5a5448",
+                          background: "transparent", border: "1px dashed #cdc5b8",
+                          cursor: "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+                        }}
+                      >
+                        <Plus size={14} /> Tilføj klasse
+                      </button>
+                    )}
+                  </div>
+                </aside>
               </div>
-
-              {/* Højre: klasser */}
-              <aside className="laerere-aside" style={{ position: "sticky", top: "24px" }}>
-                <div style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "baseline",
-                  padding: "0 14px", marginBottom: "4px",
-                }}>
-                  <h2 style={{
-                    fontFamily: "'Fraunces', Georgia, serif", fontSize: "20px",
-                    fontWeight: 600, color: "#1a1a1a", margin: 0,
-                  }}>
-                    Klasser
-                  </h2>
-                  <span style={{ fontSize: "12px", color: "#7a7367", fontWeight: 500 }}>
-                    {migAntalKlasser} i alt
-                  </span>
-                </div>
-                {migOversigt.length === 0 ? (
+              {/* DragOverlay: viser den klasse-chip der trækkes — samme stil som
+                  lærer-overlay i klasse-visning (ingen baggrund, kun avatar + navn). */}
+              <DragOverlay dropAnimation={null}>
+                {activeMinDrag && typeof activeMinDrag === "string" && activeMinDrag.startsWith("klasse:") ? (
                   <div style={{
-                    padding: "16px 14px", fontSize: "13px",
-                    color: "#9a9387", fontStyle: "italic",
+                    display: "inline-flex", alignItems: "center", gap: "8px",
+                    cursor: "grabbing",
+                    filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.18))",
                   }}>
-                    Tilføj fag med en klasse for at se oversigten her.
+                    <div style={{
+                      width: "22px", height: "22px", borderRadius: "50%",
+                      background: farveForNavn(activeMinDrag.slice("klasse:".length)),
+                      color: "#fff", fontSize: "11px", fontWeight: 600,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      flexShrink: 0,
+                      letterSpacing: "-0.02em",
+                    }}>
+                      {klasseAvatarTekst(activeMinDrag.slice("klasse:".length))}
+                    </div>
+                    <span style={{
+                      fontSize: "13px", fontWeight: 500, color: "#1a1a1a",
+                      fontStyle: "normal",
+                      whiteSpace: "nowrap",
+                    }}>
+                      {activeMinDrag.slice("klasse:".length)}
+                    </span>
                   </div>
-                ) : (
-                  <div>
-                    {migOversigt.map((k) => (
-                      <div key={k.klasse} className="laerer-item" style={{ padding: "10px 14px" }}>
-                        <div className="laerer-item-row" style={{
-                          display: "flex", alignItems: "center", justifyContent: "space-between",
-                          gap: "10px", marginBottom: "2px",
-                        }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: 1 }}>
-                            <div
-                              className="laerer-avatar"
-                              style={{
-                                width: "24px", height: "24px", borderRadius: "50%",
-                                background: farveForNavn(k.klasse), color: "#fff",
-                                fontSize: "11px", fontWeight: 600,
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                flexShrink: 0,
-                                letterSpacing: "-0.02em",
-                              }}
-                            >
-                              {klasseAvatarTekst(k.klasse)}
-                            </div>
-                            <span className="laerer-navn" style={{
-                              fontFamily: "'Fraunces', Georgia, serif",
-                              fontSize: "15px", fontWeight: 500, color: "#1a1a1a",
-                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                            }}>
-                              {k.klasse}
-                            </span>
-                          </div>
-                          <span className="laerer-total" style={{
-                            fontSize: "16px", fontWeight: 500, color: "#1a1a1a",
-                            fontVariantNumeric: "tabular-nums",
-                            flexShrink: 0,
-                          }}>
-                            {k.total}
-                          </span>
-                        </div>
-                        <div className="laerer-fag-tags" style={{
-                          fontSize: "11px", color: "#7a7367",
-                          display: "flex", flexWrap: "wrap", gap: "6px",
-                          paddingLeft: "34px",
-                        }}>
-                          {k.fag.map((f, i) => (
-                            <span key={i}>
-                              {fagForkortelse(f.navn)} {f.lektioner}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </aside>
-            </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
           </>
         )}
       </div>
@@ -2813,6 +2914,78 @@ function MinManglerBox({ mangler, maal, antalFag }) {
   );
 }
 
+// MIN-OVERSIGT: sidebar-række for en klasse — draggable mod fag-kort.
+// ID format "klasse:<navn>" så drag-handler kan skille det fra fag-id'er.
+// Pending klasser vises mere dæmpet (total = 0, ingen chips).
+function SidebarKlasseRow({ klasse, total, fag, pending = false }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `klasse:${klasse}`,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      className="laerer-item"
+      style={{
+        padding: "10px 14px",
+        opacity: isDragging ? 0.4 : 1,
+      }}
+    >
+      <div className="laerer-item-row" style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: "10px", marginBottom: "2px",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: 1 }}>
+          <div
+            {...listeners}
+            className="laerer-avatar"
+            style={{
+              width: "24px", height: "24px", borderRadius: "50%",
+              background: farveForNavn(klasse), color: "#fff",
+              fontSize: "11px", fontWeight: 600,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0,
+              letterSpacing: "-0.02em",
+              cursor: "grab", touchAction: "none",
+            }}
+          >
+            {klasseAvatarTekst(klasse)}
+          </div>
+          <span className="laerer-navn" style={{
+            fontFamily: "'Fraunces', Georgia, serif",
+            fontSize: "15px", fontWeight: 500,
+            color: pending ? "#7a7367" : "#1a1a1a",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {klasse}
+          </span>
+        </div>
+        <span className="laerer-total" style={{
+          fontSize: "16px", fontWeight: 500,
+          color: pending ? "#cdc5b8" : "#1a1a1a",
+          fontVariantNumeric: "tabular-nums",
+          flexShrink: 0,
+        }}>
+          {total}
+        </span>
+      </div>
+      {fag.length > 0 && (
+        <div className="laerer-fag-tags" style={{
+          fontSize: "11px", color: "#7a7367",
+          display: "flex", flexWrap: "wrap", gap: "6px",
+          paddingLeft: "34px",
+        }}>
+          {fag.map((f, i) => (
+            <span key={i}>
+              {fagForkortelse(f.navn)} {f.lektioner}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // MIN-OVERSIGT: udleder en kort avatar-tekst fra klassenavn (fx "9.S" → "9S",
 // "8.A" → "8A"). Bevarer både cifre og bogstaver — meningsfuld initial.
 function klasseAvatarTekst(klasse) {
@@ -2833,13 +3006,41 @@ function normaliserKlasse(input) {
   return trimmed;
 }
 
+// MIN-OVERSIGT: normaliserer fag-input så "dansk" → "Dansk", "MATEMATIK" → "Matematik",
+// "natur/teknologi" → "Natur/teknologi". Match mod STANDARD_FAG case-insensitivt for
+// kanonisk capitalisation (især vigtig for fag med skråstreger og "og"). Ellers bare
+// første bogstav stort.
+function normaliserFag(input) {
+  if (!input) return "";
+  const trimmed = input.trim();
+  if (!trimmed) return "";
+  const canonical = STANDARD_FAG.find(s => s.toLowerCase() === trimmed.toLowerCase());
+  if (canonical) return canonical;
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
 // MIN-OVERSIGT: fag-kort der spejler klasse-visningens struktur — fag-navn +
 // lektioner i header, klasse-avatar + klasse-navn nedenunder (i stedet for lærere).
+// Sortable: kortet kan trækkes for at omarrangere; drag-zonen er den ledige plads
+// i headeren mellem fag-navn og lektion-tal (samme mønster som klasse-visning).
 function MinFagCard({ f, opdater, slet }) {
   const [hover, setHover] = React.useState(false);
   const harKlasse = !!(f.klasse && f.klasse.trim());
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: f.id,
+    transition: { duration: 280, easing: "cubic-bezier(0.25, 1, 0.5, 1)" },
+  });
+  const sortableStyle = {
+    transform: CSS.Transform.toString(transform),
+    transition: isDragging ? undefined : transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : "auto",
+    boxShadow: isDragging ? "0 12px 32px rgba(26,26,26,0.22)" : "none",
+  };
   return (
     <div
+      ref={setNodeRef}
+      {...attributes}
       className="fag-card"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
@@ -2847,6 +3048,7 @@ function MinFagCard({ f, opdater, slet }) {
         background: "#fff", border: "1px solid #e0d9ca",
         position: "relative",
         display: "flex", flexDirection: "column",
+        ...sortableStyle,
       }}
     >
       <button
@@ -2863,44 +3065,77 @@ function MinFagCard({ f, opdater, slet }) {
       >
         <Trash2 size={14} />
       </button>
-      {/* Header: fag-navn + lektion-tal (samme grid som klasse-visningens fag-kort) */}
+      {/* Header: fag-navn + drag-zone + lektion-tal (samme grid + stil som klasse-visning) */}
       <div className="fag-card-header" style={{
-        padding: "14px 14px 10px 14px",
-        display: "flex", alignItems: "baseline", gap: "8px",
+        padding: "14px 10px 10px 14px",
+        display: "flex", alignItems: "center", gap: "4px",
       }}>
-        <input
+        <GhostInput
           type="text"
           value={f.navn}
-          onChange={(e) => opdater("navn", e.target.value)}
+          onChange={(navn) => opdater("navn", navn)}
+          suggestions={STANDARD_FAG}
           placeholder="Fag"
           className="fag-card-fagnavn"
+          wrapperStyle={{ flexShrink: 1, minWidth: 0 }}
+          onAccept={() => document.activeElement?.blur?.()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") document.activeElement?.blur?.();
+          }}
+          onBlur={() => {
+            const normaliseret = normaliserFag(f.navn);
+            if (normaliseret !== f.navn) opdater("navn", normaliseret);
+          }}
           style={{
-            flex: "1 1 auto", minWidth: 0,
             fontFamily: "'Fraunces', Georgia, serif",
             fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
             background: "transparent", border: "none",
-            padding: 0, outline: "none", lineHeight: 1.2,
+            padding: "2px 0", outline: "none", lineHeight: 1.2,
+            fieldSizing: "content",
+            minWidth: "60px",
+            maxWidth: "100%",
           }}
         />
-        <div style={{ display: "flex", alignItems: "baseline", gap: "4px", flexShrink: 0 }}>
+        {/* Drag-zone — usynlig, fylder ledig plads, kun her starter drag */}
+        <div
+          {...listeners}
+          aria-label="Træk for at flytte fag"
+          style={{
+            flex: 1, alignSelf: "stretch", minWidth: "20px",
+            cursor: "grab",
+            touchAction: "none",
+          }}
+        />
+        {/* Lektionsantal — samme stil som klasse-visningens fag-kort */}
+        <div className="fag-card-lekt-group" style={{
+          display: "flex", alignItems: "baseline", gap: "2px",
+          flexShrink: 0,
+        }}>
           <input
             type="number" min="0" max="40"
-            value={f.lektioner}
-            onChange={(e) => opdater("lektioner", parseInt(e.target.value) || 0)}
+            value={f.lektioner === "" || f.lektioner === undefined ? "" : f.lektioner}
+            onChange={(e) => {
+              const v = e.target.value;
+              opdater("lektioner", v === "" ? "" : (parseInt(v) || 0));
+            }}
+            onFocus={(e) => e.target.select()}
+            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+            onBlur={() => {
+              if (f.lektioner === "" || f.lektioner === undefined) opdater("lektioner", 0);
+            }}
             className="fag-card-lekt-input"
             style={{
               fontFamily: "'Fraunces', Georgia, serif",
-              fontSize: "22px", fontWeight: 600, color: "#1a1a1a",
+              fontSize: "16px", fontWeight: 500, color: "#5a5448",
               background: "transparent", border: "none",
-              padding: 0, outline: "none",
-              fontVariantNumeric: "tabular-nums",
-              width: "32px", textAlign: "right",
+              padding: 0, textAlign: "left",
+              outline: "none",
             }}
           />
           <span className="fag-card-lekt-label" style={{
-            fontSize: "13px", color: "#7a7367",
+            fontSize: "12px", color: "#9a9387",
           }}>
-            lek
+            lektioner
           </span>
         </div>
       </div>
@@ -2928,6 +3163,7 @@ function MinFagCard({ f, opdater, slet }) {
             type="text"
             value={f.klasse}
             onChange={(e) => opdater("klasse", e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
             onBlur={(e) => {
               const normaliseret = normaliserKlasse(e.target.value);
               if (normaliseret !== e.target.value) opdater("klasse", normaliseret);
