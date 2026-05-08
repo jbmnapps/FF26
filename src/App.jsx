@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Plus, Trash2, Download, Upload, X, Users, BookOpen, AlertCircle, CheckCircle2, Circle, ChevronDown, RotateCcw, Menu, Pencil, Undo2, HelpCircle } from "lucide-react";
-import { DndContext, DragOverlay, closestCorners, pointerWithin, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, MeasuringStrategy } from "@dnd-kit/core";
+import { DndContext, DragOverlay, closestCorners, pointerWithin, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable, MeasuringStrategy } from "@dnd-kit/core";
 import { SortableContext, useSortable, rectSortingStrategy, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
@@ -810,7 +810,12 @@ export default function Fagfordeling() {
     setFag(
       fag.map((f) => {
         if (f.id !== fagId) return f;
-        const nyeLaerere = f.laerere.filter((l) => l.id !== laererId);
+        let nyeLaerere = f.laerere.filter((l) => l.id !== laererId);
+        // Hvis ingen navngivne lærere er tilbage, ryd arrayet helt — ellers
+        // efterlader slot-padding "ghost"-empties som ser forvirrende ud.
+        // Forventet padding genvises via virtuelle DroppableEmptySlot'er.
+        const harNogenNavngiven = nyeLaerere.some((l) => l.navn?.trim());
+        if (!harNogenNavngiven) nyeLaerere = [];
         // Hvis sletning bringer lærer-antal under forventedeLaerere, sænk forventede
         // så kortet skrumper naturligt (default minimum 2). Brugeren kan eksplicit
         // sætte forventede højere igen via 1/2/3-knapperne hvis de vil holde plads.
@@ -1465,11 +1470,22 @@ export default function Fagfordeling() {
   // (2) lærer-kort kan ikke længere "snape" til distant cards.
   const collisionDetectionStrategy = React.useCallback((args) => {
     const pointerCollisions = pointerWithin(args);
-    if (pointerCollisions.length > 0) return pointerCollisions;
     const activeId = args.active?.id;
     const isFagDrag = fag.some((f) => f.id === activeId);
-    if (isFagDrag) return closestCorners(args);
-    return [];
+    const fagIds = new Set(fag.map((f) => f.id));
+    if (isFagDrag) {
+      if (pointerCollisions.length > 0) return pointerCollisions;
+      return closestCorners(args);
+    }
+    // Lærer/sidebar-drag: vi vil aldrig have fag-kortet selv som target,
+    // og vi må aldrig returnere det aktive element selv (ellers ender
+    // sortable-shuffled drops med at "ramme sig selv" = no-op). Filtrér
+    // begge fra både pointerWithin og closestCorners-fallback.
+    const reject = (c) => fagIds.has(c.id) || c.id === activeId;
+    const innerPointer = pointerCollisions.filter((c) => !reject(c));
+    if (innerPointer.length > 0) return innerPointer;
+    const innerCC = closestCorners(args).filter((c) => !reject(c));
+    return innerCC;
   }, [fag]);
 
   // Samme strategi for Min oversigt: drop kun valid hvis musen er INDE i
@@ -1534,21 +1550,53 @@ export default function Fagfordeling() {
     if (isSidebarDrag) return;
 
     const overIsFag = fag.some((f) => f.id === over.id);
+    const overIsSlot = typeof over.id === "string" && over.id.startsWith("slot:");
     const currentSource = fag.find((f) => f.laerere.some((l) => l.id === active.id));
     if (!currentSource) return;
 
-    const target = overIsFag
-      ? fag.find((f) => f.id === over.id)
-      : fag.find((f) => f.laerere.some((l) => l.id === over.id));
+    let target;
+    if (overIsFag) {
+      target = fag.find((f) => f.id === over.id);
+    } else if (overIsSlot) {
+      const targetFagId = over.id.split(":")[1];
+      target = fag.find((f) => f.id === targetFagId);
+    } else {
+      target = fag.find((f) => f.laerere.some((l) => l.id === over.id));
+    }
     if (!target) return;
 
     if (target.id === currentSource.id) return;
 
     const movingLaerer = currentSource.laerere.find((l) => l.id === active.id);
-    let destIndex = overIsFag
-      ? target.laerere.length
-      : target.laerere.findIndex((l) => l.id === over.id);
-    if (destIndex < 0) destIndex = target.laerere.length;
+    let destIndex;
+    // replaceMode: drop på en eksisterende tom (unnamed) entry skal *erstatte*
+    // den, ikke indsættes før — ellers vokser arrayet ud over forventedeLaerere.
+    // (Skabelon-init opretter unnamed entries, så cards har præ-fyldte slots
+    // brugeren kan udfylde eller droppe lærere på.)
+    let replaceMode = false;
+    if (overIsFag) {
+      // Drop på selve fag-kortet (ikke en specifik række): hvis der er tomme
+      // entries, erstat den FØRSTE — så kortet "fyldes op" oppefra.
+      const firstUnnamedIdx = target.laerere.findIndex((l) => !l.navn?.trim());
+      if (firstUnnamedIdx >= 0) {
+        destIndex = firstUnnamedIdx;
+        replaceMode = true;
+      } else {
+        destIndex = target.laerere.length;
+      }
+    } else if (overIsSlot) {
+      // Virtuel slot — endelig position sættes i handleDragEnd. Indtil da
+      // placerer vi læreren sidst i target, så drag-preview viser læreren i
+      // det rigtige fag-kort.
+      destIndex = target.laerere.length;
+    } else {
+      destIndex = target.laerere.findIndex((l) => l.id === over.id);
+      if (destIndex < 0) destIndex = target.laerere.length;
+      const overLaerer = target.laerere.find((l) => l.id === over.id);
+      if (overLaerer && !overLaerer.navn?.trim()) {
+        replaceMode = true;
+      }
+    }
 
     setFag((prev) => prev.map((f) => {
       if (f.id === currentSource.id) {
@@ -1557,7 +1605,11 @@ export default function Fagfordeling() {
       if (f.id === target.id) {
         if (f.laerere.some((l) => l.id === active.id)) return f;
         const newLaerere = [...f.laerere];
-        newLaerere.splice(destIndex, 0, movingLaerer);
+        if (replaceMode) {
+          newLaerere.splice(destIndex, 1, movingLaerer);
+        } else {
+          newLaerere.splice(destIndex, 0, movingLaerer);
+        }
         return { ...f, laerere: newLaerere };
       }
       return f;
@@ -1574,17 +1626,33 @@ export default function Fagfordeling() {
 
     const activeIsFag = fag.some((f) => f.id === activeId);
     const overIsFag = fag.some((f) => f.id === over.id);
+    const overIsSlot = typeof over.id === "string" && over.id.startsWith("slot:");
+
+    // Slot-drop info (bruges af både sidebar- og lærer-drag)
+    let slotTargetFagId = null;
+    let slotTargetIdx = null;
+    if (overIsSlot) {
+      const parts = over.id.split(":");
+      slotTargetFagId = parts[1];
+      slotTargetIdx = parseInt(parts[2]);
+    }
 
     // Sidebar-drag: tilføj lærer til target-fag (med lektioner = fagets lektioner).
     // Skip hvis lærer allerede er på faget.
     if (typeof activeId === "string" && activeId.startsWith("sidebar:")) {
       const sidebarNavn = activeId.slice("sidebar:".length);
       let targetFagId = null;
+      let targetLaererId = null;
       if (overIsFag) {
         targetFagId = over.id;
+      } else if (overIsSlot) {
+        targetFagId = slotTargetFagId;
       } else {
         const overFag = fag.find((f) => f.laerere.some((l) => l.id === over.id));
-        if (overFag) targetFagId = overFag.id;
+        if (overFag) {
+          targetFagId = overFag.id;
+          targetLaererId = over.id;
+        }
       }
       if (!targetFagId) return;
       setFag((prev) => prev.map((f) => {
@@ -1594,10 +1662,36 @@ export default function Fagfordeling() {
           return f;
         }
         const fagLekt = parseInt(f.lektioner) || 0;
-        return {
-          ...f,
-          laerere: [...f.laerere, { id: nytId(), navn: sidebarNavn, lektioner: fagLekt }],
-        };
+        const nyLaerer = { id: nytId(), navn: sidebarNavn, lektioner: fagLekt };
+        if (overIsSlot && slotTargetIdx !== null && !Number.isNaN(slotTargetIdx)) {
+          // Pad med tomme entries op til slot-index, så lærer lander på det
+          // valgte slot — ikke bare sidst.
+          const newLaerere = [...f.laerere];
+          while (newLaerere.length < slotTargetIdx) {
+            newLaerere.push({ id: nytId(), navn: "", lektioner: 0 });
+          }
+          newLaerere.splice(slotTargetIdx, 0, nyLaerer);
+          return { ...f, laerere: newLaerere };
+        }
+        // Drop på en specifik lærer-række: erstat hvis den er tom.
+        if (targetLaererId) {
+          const idx = f.laerere.findIndex((l) => l.id === targetLaererId);
+          if (idx >= 0 && !f.laerere[idx].navn?.trim()) {
+            const newLaerere = [...f.laerere];
+            newLaerere.splice(idx, 1, nyLaerer);
+            return { ...f, laerere: newLaerere };
+          }
+        }
+        // Drop på fag-kortet: erstat første tomme entry hvis der er en.
+        if (overIsFag) {
+          const firstUnnamedIdx = f.laerere.findIndex((l) => !l.navn?.trim());
+          if (firstUnnamedIdx >= 0) {
+            const newLaerere = [...f.laerere];
+            newLaerere.splice(firstUnnamedIdx, 1, nyLaerer);
+            return { ...f, laerere: newLaerere };
+          }
+        }
+        return { ...f, laerere: [...f.laerere, nyLaerer] };
       }));
       setPendingNavne((prev) => prev.filter((n) => n !== sidebarNavn));
       return;
@@ -1616,12 +1710,31 @@ export default function Fagfordeling() {
     }
 
     // Lærer-drag: handleDragOver har allerede flyttet læreren til destination.
-    // Vi håndterer her: (a) within-fag reorder, (b) lektionstal-justering ved cross-fag.
+    // Vi håndterer her: (a) slot-drop (pad + flyt til præcis slot-index),
+    // (b) within-fag reorder, (c) lektionstal-justering ved cross-fag.
     const currentFag = fag.find((f) => f.laerere.some((l) => l.id === activeId));
     if (!currentFag) return;
 
+    // Slot-drop: flyt læreren til det valgte slot-index, padding med tomme
+    // entries hvis nødvendigt så positionen holder.
+    if (overIsSlot && slotTargetFagId && currentFag.id === slotTargetFagId
+        && slotTargetIdx !== null && !Number.isNaN(slotTargetIdx)) {
+      setFag((prev) => prev.map((f) => {
+        if (f.id !== currentFag.id) return f;
+        const movingLaerer = f.laerere.find((l) => l.id === activeId);
+        if (!movingLaerer) return f;
+        const without = f.laerere.filter((l) => l.id !== activeId);
+        const padded = [...without];
+        while (padded.length < slotTargetIdx) {
+          padded.push({ id: nytId(), navn: "", lektioner: 0 });
+        }
+        padded.splice(slotTargetIdx, 0, movingLaerer);
+        return { ...f, laerere: padded };
+      }));
+    }
+
     // Within-fag reorder (drop på en anden lærer i samme fag)
-    if (!overIsFag) {
+    if (!overIsFag && !overIsSlot) {
       const overFag = fag.find((f) => f.laerere.some((l) => l.id === over.id));
       if (overFag && overFag.id === currentFag.id) {
         const sourceIdx = currentFag.laerere.findIndex((l) => l.id === activeId);
@@ -4242,7 +4355,7 @@ function SidebarLaererRow({ l }) {
 }
 
 function SortableLaererRow({
-  l, fagId, mode,
+  l, fagId, mode, placeholderLabel,
   // expanded-only props:
   lektTal, status, opdaterLaerer, sletLaerer, eksisterendeLaerere, allowDelete,
 }) {
@@ -4255,6 +4368,7 @@ function SortableLaererRow({
   };
 
   if (mode === "compact") {
+    const harNavn = !!l.navn.trim();
     const lekt = parseInt(l.lektioner) || 0;
     return (
       <div ref={setNodeRef} {...attributes} style={{
@@ -4264,28 +4378,32 @@ function SortableLaererRow({
       }}>
         <div {...listeners} style={{
           width: "18px", height: "18px", borderRadius: "50%",
-          background: farveForNavn(l.navn),
+          background: harNavn ? farveForNavn(l.navn) : "transparent",
+          border: harNavn ? "none" : "1.5px dashed #cdc5b8",
           color: "#fff", fontSize: "10px", fontWeight: 600,
           display: "flex", alignItems: "center", justifyContent: "center",
           flexShrink: 0,
           cursor: "grab", touchAction: "none",
         }}>
-          {l.navn.charAt(0).toUpperCase()}
+          {harNavn ? l.navn.charAt(0).toUpperCase() : ""}
         </div>
         <span style={{
           flex: 1, minWidth: 0,
-          fontSize: "13px", color: "#1a1a1a",
+          fontSize: "13px",
+          color: harNavn ? "#1a1a1a" : "#cdc5b8",
           fontStyle: "normal",
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}>
-          {l.navn}
+          {harNavn ? l.navn : (placeholderLabel || "Lærer")}
         </span>
-        <span style={{
-          fontSize: "11px", color: "#7a7367",
-          flexShrink: 0,
-        }}>
-          {lekt} lek
-        </span>
+        {harNavn && (
+          <span style={{
+            fontSize: "11px", color: "#7a7367",
+            flexShrink: 0,
+          }}>
+            {lekt} lek
+          </span>
+        )}
       </div>
     );
   }
@@ -4368,6 +4486,39 @@ function SortableLaererRow({
           <X size={14} />
         </button>
       )}
+    </div>
+  );
+}
+
+// Droppable virtual slot — fag-kort har visuel padding op til forventedeLaerere
+// når der er færre lærere i data end forventet. Hvert padding-felt er nu en
+// rigtig droppable, så brugeren kan slippe en lærer på slot 1, 2 eller 3 frit.
+// Drop håndteres i handleDragEnd via id-prefix "slot:<fagId>:<index>".
+function DroppableEmptySlot({ slotId, label }) {
+  const { setNodeRef, isOver } = useDroppable({ id: slotId });
+  return (
+    <div ref={setNodeRef} style={{
+      display: "flex", alignItems: "center", gap: "8px",
+      padding: "3px 0",
+      transition: "background 0.12s ease",
+    }}>
+      <div style={{
+        width: "18px", height: "18px", borderRadius: "50%",
+        background: "transparent",
+        border: `1.5px dashed ${isOver ? "#1a1a1a" : "#cdc5b8"}`,
+        flexShrink: 0,
+        transition: "border-color 0.12s ease",
+      }} />
+      <span style={{
+        flex: 1, minWidth: 0,
+        fontSize: "13px",
+        color: isOver ? "#1a1a1a" : "#cdc5b8",
+        fontWeight: isOver ? 500 : 400,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        transition: "color 0.12s ease, font-weight 0.12s ease",
+      }}>
+        {label}
+      </span>
     </div>
   );
 }
@@ -4548,32 +4699,40 @@ function SortableFagCard({
       </div>
 
       {/* Kollapset: kompakte lærer-rækker (avatar + navn + svag "X lek").
-          Tomme pladser fyldes op til forventedeLaerere, så kort har konsistent
-          højde — også cards uden navngivne lærere endnu (fx fra skabelon). */}
+          Vi renderer alle f.laerere i rækkefølge (navngivne + tomme entries
+          fra slot-padding). Hvis f.laerere.length < forventedeLaerere, fyldes
+          de manglende slots op med droppable virtuelle pladser, så brugeren
+          kan slippe en lærer på slot 1, 2 eller 3 frit. */}
       {!erUdfoldet && (() => {
-        const namedLaerere = f.laerere.filter((l) => l.navn.trim());
         const forventede = parseInt(f.forventedeLaerere) || 2;
-        const emptyCount = Math.max(0, forventede - namedLaerere.length);
+        const slotsCount = Math.max(forventede, f.laerere.length);
+        const virtualCount = Math.max(0, slotsCount - f.laerere.length);
         return (
           <div style={{ borderTop: "1px solid #f0ead9", padding: "6px 14px 10px" }}>
             <SortableContext
-              items={namedLaerere.map((l) => l.id)}
+              items={f.laerere.map((l) => l.id)}
               strategy={verticalListSortingStrategy}
             >
-              {namedLaerere.map((l) => (
-                <SortableLaererRow key={l.id} l={l} fagId={f.id} mode="compact" />
+              {f.laerere.map((l, idx) => (
+                <SortableLaererRow
+                  key={l.id}
+                  l={l}
+                  fagId={f.id}
+                  mode="compact"
+                  placeholderLabel={`Lærer ${idx + 1}`}
+                />
               ))}
             </SortableContext>
-            {Array.from({ length: emptyCount }).map((_, i) => (
-              <div key={`empty-${i}`} style={{
-                height: "26px",
-                display: "flex", alignItems: "center",
-                paddingLeft: "26px", // matcher avatar-bredde + gap
-                fontSize: "13px", color: "#cdc5b8",
-              }}>
-                Lærer {namedLaerere.length + i + 1}
-              </div>
-            ))}
+            {Array.from({ length: virtualCount }).map((_, i) => {
+              const slotIndex = f.laerere.length + i;
+              return (
+                <DroppableEmptySlot
+                  key={`slot-${slotIndex}`}
+                  slotId={`slot:${f.id}:${slotIndex}`}
+                  label={`Lærer ${slotIndex + 1}`}
+                />
+              );
+            })}
           </div>
         );
       })()}
