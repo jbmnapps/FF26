@@ -218,6 +218,18 @@ function fagForkortelse(navn) {
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1, 3).toLowerCase();
 }
 
+// Display-navn til fag-kort header: korte navne ("Dansk", "Matematik") vises
+// uændret, men lange navne ("Håndværk og design", "Natur og teknologi")
+// vises som forkortelse ("HDS", "Nat/Tek") så header ikke presser status-
+// ikon og chevron ud. Det fulde navn bevares i data og vises i edit-mode.
+function fagDisplayNavn(navn) {
+  if (!navn) return "";
+  const trimmed = navn.trim();
+  if (trimmed.length <= 12) return trimmed;
+  const forkort = FAG_FORKORTELSER[trimmed.toLowerCase()];
+  return forkort || trimmed;
+}
+
 // Module-level maps fra normaliseret navn → farve. Bygges via useMemo i
 // Fagfordeling-komponenten, så de kun rebygges når input ændrer sig.
 // Position-baseret tildeling sikrer ingen hash-kollisioner mellem synlige.
@@ -288,8 +300,9 @@ function findSuggestion(value, options) {
   );
 }
 
-function GhostInput({ value, onChange, suggestions = [], style, wrapperStyle, className, onKeyDown, onFocus, onBlur, onAccept, ...rest }) {
-  const inputRef = React.useRef(null);
+function GhostInput({ value, onChange, suggestions = [], style, wrapperStyle, className, onKeyDown, onFocus, onBlur, onAccept, inputRef: externalRef, ...rest }) {
+  const innerRef = React.useRef(null);
+  const inputRef = externalRef || innerRef;
   const [focused, setFocused] = React.useState(false);
   const suggestion = findSuggestion(value, suggestions);
   const showChip = focused && !!suggestion;
@@ -4531,9 +4544,22 @@ function SortableFagCard({
 }) {
   const lektTal = parseInt(f.lektioner) || 0;
   const lektInputRef = React.useRef(null);
+  const navnInputRef = React.useRef(null);
   // Auto-jump fra fagnavn → lektion sker kun første gang fagnavnet skrives.
   // Hvis kortet allerede har et navn ved mount (loadet fra storage), springer vi over.
   const [hasJumpedToLekt, setHasJumpedToLekt] = React.useState(() => f.navn.trim().length > 0);
+  // Display/edit-toggle for fagnavnet: korte navne ("Dansk") vises uændret
+  // som et span; lange navne ("Håndværk og design") vises som forkortelse
+  // ("HDS"). Klik på spannet aktiverer edit-mode med fuldt navn i input.
+  // Tomme/nye kort starter direkte i edit-mode så brugeren kan taste straks.
+  const [editingNavn, setEditingNavn] = React.useState(() => !f.navn.trim());
+  const aabnNavnEdit = () => {
+    setEditingNavn(true);
+    setTimeout(() => {
+      const inp = navnInputRef.current;
+      if (inp) { inp.focus(); inp.select?.(); }
+    }, 0);
+  };
 
   const focusLektFirstTime = () => {
     if (hasJumpedToLekt) return;
@@ -4582,30 +4608,52 @@ function SortableFagCard({
         padding: "14px 10px 10px 14px",
         display: "flex", alignItems: "center", gap: "4px",
       }}>
-        {/* Fagnavn — auto-bredde, kun teksten er klikbar */}
-        <GhostInput
-          className="fag-input fag-card-fagnavn"
-          type="text"
-          placeholder="Fagnavn"
-          value={f.navn}
-          onChange={(navn) => opdaterFag(f.id, { navn })}
-          suggestions={STANDARD_FAG}
-          onAccept={focusLektFirstTime}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") e.target.blur(); }}
-          onBlur={() => {
-            if (f.navn.trim().length > 0) focusLektFirstTime();
-          }}
-          wrapperStyle={{ flexShrink: 1, minWidth: 0 }}
-          style={{
-            fontFamily: "'Fraunces', Georgia, serif",
-            fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
-            background: "transparent", border: "none",
-            padding: "2px 0", lineHeight: 1.2,
-            fieldSizing: "content",
-            minWidth: "60px",
-            maxWidth: "100%",
-          }}
-        />
+        {/* Fagnavn — display/edit toggle. Lange navne vises som forkortelse
+            ("Håndværk og design" → "HDS"). Klik aktiverer edit med fuldt navn. */}
+        {editingNavn ? (
+          <GhostInput
+            autoFocus
+            inputRef={navnInputRef}
+            className="fag-input fag-card-fagnavn"
+            type="text"
+            placeholder="Fagnavn"
+            value={f.navn}
+            onChange={(navn) => opdaterFag(f.id, { navn })}
+            suggestions={STANDARD_FAG}
+            onAccept={() => { setEditingNavn(false); focusLektFirstTime(); }}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") e.target.blur(); }}
+            onBlur={() => {
+              setEditingNavn(false);
+              if (f.navn.trim().length > 0) focusLektFirstTime();
+            }}
+            wrapperStyle={{ flexShrink: 1, minWidth: 0 }}
+            style={{
+              fontFamily: "'Fraunces', Georgia, serif",
+              fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
+              background: "transparent", border: "none",
+              padding: "2px 0", lineHeight: 1.2,
+              fieldSizing: "content",
+              minWidth: "60px",
+              maxWidth: "100%",
+            }}
+          />
+        ) : (
+          <span
+            onClick={aabnNavnEdit}
+            title={f.navn.trim()}
+            className="fag-card-fagnavn"
+            style={{
+              fontFamily: "'Fraunces', Georgia, serif",
+              fontSize: "20px", fontWeight: 500, color: "#1a1a1a",
+              padding: "2px 0", lineHeight: 1.2,
+              cursor: "text",
+              flexShrink: 1, minWidth: 0,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}
+          >
+            {fagDisplayNavn(f.navn)}
+          </span>
+        )}
 
         {/* Drag-zone — usynlig, fylder ledig plads, kun her starter drag */}
         <div
